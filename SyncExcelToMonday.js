@@ -182,6 +182,38 @@ async function createItem(boardId, groupId, itemName, columnValues, apiKey) {
   }
 }
 
+// Function to delete a column from the board
+async function deleteColumn(boardId, columnId, apiKey) {
+  const mutation = `
+    mutation($boardId: ID!, $columnId: String!) {
+      delete_column(board_id: $boardId, column_id: $columnId) {
+        id
+      }
+    }
+  `;
+
+  const variables = {
+    boardId: parseInt(boardId),
+    columnId: columnId
+  };
+
+  try {
+    const response = await axios.post('https://api.monday.com/v2', { query: mutation, variables }, {
+      headers: { Authorization: apiKey }
+    });
+
+    if (response.data.errors) {
+      console.error('GraphQL errors:', response.data.errors);
+      return null;
+    }
+
+    console.log(`Deleted column with ID: ${columnId}`);
+    return response.data.data.delete_column.id;
+  } catch (error) {
+    console.error('Error deleting column:', error);
+  }
+}
+
 // Main function to update or create board based on Excel file and ensure columns match
 async function updateOrCreateBoard(filePath, apiKey, boardId) {
   const excelData = readExcelFile(filePath);
@@ -233,6 +265,14 @@ async function updateOrCreateBoard(filePath, apiKey, boardId) {
     }
   }
 
+  // Delete columns that exist on the board but are not in the Excel sheet
+  for (let existingColumn of existingColumns) {
+    if (!excelColumns.some(excelCol => excelCol.toLowerCase() === existingColumn.title.trim().toLowerCase())) {
+      console.log(`Deleting extra column: ${existingColumn.title}`);
+      await deleteColumn(boardId, existingColumn.id, apiKey);
+    }
+  }
+
   // Iterate over Excel data and create items using the year value as the item name
   for (const row of excelData) {
     const year = String(row.Year).trim(); // Ensure 'Year' is used as the item name (default column)
@@ -255,5 +295,5 @@ async function updateOrCreateBoard(filePath, apiKey, boardId) {
 updateOrCreateBoard(
   'Acura Pre-Qual Long Sheet v6.3.xlsx',
   'eyJhbGciOiJIUzI1NiJ9.eyJ0aWQiOjQwNzM1MzIxNywiYWFpIjoxMSwidWlkIjo0MTI5ODM0MCwiaWFkIjoiMjAyNC0wOS0wNlQxNjo0MjozMi4wMDBaIiwicGVyIjoibWU6d3JpdGUiLCJhY3RpZCI6MTIzOTkzMjYsInJnbiI6InVzZTEifQ._QYJKxEcmmUB6-en7MKIPHXw3s-7_lNGDVFBLjNjK18', // Replace with your actual API key
-  '7428983059' // Replace with your actual board ID
+  '7474497335' // Replace with your actual board ID
 );
