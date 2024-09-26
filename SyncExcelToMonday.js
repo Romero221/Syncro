@@ -334,5 +334,5 @@ async function updateOrCreateBoard(filePath, apiKey, boardId) {
 updateOrCreateBoard(
   'Acura Pre-Qual Long Sheet v6.3.xlsx',
   'eyJhbGciOiJIUzI1NiJ9.eyJ0aWQiOjQwNzM1MzIxNywiYWFpIjoxMSwidWlkIjo0MTI5ODM0MCwiaWFkIjoiMjAyNC0wOS0wNlQxNjo0MjozMi4wMDBaIiwicGVyIjoibWU6d3JpdGUiLCJhY3RpZCI6MTIzOTkzMjYsInJnbiI6InVzZTEifQ._QYJKxEcmmUB6-en7MKIPHXw3s-7_lNGDVFBLjNjK18', // Replace with your actual API key
-  '7507019243' // Replace with your actual board ID
+  '7511416824' // Replace with your actual board ID
 );
