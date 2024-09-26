@@ -143,21 +143,20 @@ async function createColumn(boardId, columnTitle, apiKey) {
   }
 }
 
-// Function to create a new item on the board
-async function createItem(boardId, groupId, itemName, columnValues, apiKey) {
+// Function to create a new item in a specific group on the board (with year as item name)
+async function createItemInGroup(boardId, groupId, itemName, columnValues, apiKey) {
   const mutation = `
-    mutation($boardId: ID!, $groupId: ID!, $itemName: String!, $columnValues: JSON!) {
-      create_item(board_id: $boardId, group_id: $groupId, item_name: $itemName, column_values: $columnValues) {
+    mutation($boardId: ID!, $groupId: String!, $itemName: String!) {
+      create_item(board_id: $boardId, group_id: $groupId, item_name: $itemName) {
         id
       }
     }
   `;
 
   const variables = {
-    boardId: parseInt(boardId),
-    groupId: groupId,  // Use groupId directly as an ID
-    itemName,  // This will be the Year from Excel
-    columnValues: JSON.stringify(columnValues)  // Remaining column data
+    boardId: boardId,  // Ensure this is passed as an integer
+    groupId: groupId,  // Ensure this is passed as a string
+    itemName: itemName  // The Year from Excel, this is the "item name" for the first slot
   };
 
   try {
@@ -171,14 +170,54 @@ async function createItem(boardId, groupId, itemName, columnValues, apiKey) {
     }
 
     if (response.data && response.data.data && response.data.data.create_item) {
-      return response.data.data.create_item.id;
+      return response.data.data.create_item.id;  // Return the new item's ID
     } else {
       console.error('Unexpected response structure:', response.data);
       return null;
     }
 
   } catch (error) {
-    console.error('Error creating new item:', error);
+    console.error('Error creating new item in group:', error);
+    throw new Error('Failed to create item in group');
+  }
+}
+
+// Function to update the created item with column values (filling the rest of the row)
+async function updateItem(boardId, itemId, columnValues, apiKey) {
+  const mutation = `
+    mutation($boardId: ID!, $itemId: ID!, $columnValues: JSON!) {
+      change_multiple_column_values(board_id: $boardId, item_id: $itemId, column_values: $columnValues) {
+        id
+      }
+    }
+  `;
+
+  const variables = {
+    boardId: boardId,  // Ensure this is passed as an integer
+    itemId: itemId,    // The newly created item's ID
+    columnValues: JSON.stringify(columnValues)  // Convert the column values to JSON
+  };
+
+  try {
+    const response = await axios.post('https://api.monday.com/v2', { query: mutation, variables }, {
+      headers: { Authorization: apiKey }
+    });
+
+    if (response.data.errors) {
+      console.error('GraphQL errors:', response.data.errors);
+      return null;
+    }
+
+    if (response.data && response.data.data && response.data.data.change_multiple_column_values) {
+      return response.data.data.change_multiple_column_values.id;
+    } else {
+      console.error('Unexpected response structure:', response.data);
+      return null;
+    }
+
+  } catch (error) {
+    console.error('Error updating item:', error);
+    throw new Error('Failed to update item');
   }
 }
 
@@ -286,7 +325,7 @@ async function updateOrCreateBoard(filePath, apiKey, boardId) {
 
     // Now dynamically create the item in the group, with the year as the item name and the rest of the data
     console.log(`Creating item for year ${year} in group ${groupName}`);
-    const newItemId = await createItem(boardId, groupId, year, columnValues, apiKey);  // Use 'year' as the item name
+    const newItemId = await createItemInGroup(boardId, groupId, year, columnValues, apiKey);  // Use 'year' as the item name
     console.log(`Created new item for year: ${year} (ID: ${newItemId})`);
   }
 }
@@ -295,5 +334,5 @@ async function updateOrCreateBoard(filePath, apiKey, boardId) {
 updateOrCreateBoard(
   'Acura Pre-Qual Long Sheet v6.3.xlsx',
   'eyJhbGciOiJIUzI1NiJ9.eyJ0aWQiOjQwNzM1MzIxNywiYWFpIjoxMSwidWlkIjo0MTI5ODM0MCwiaWFkIjoiMjAyNC0wOS0wNlQxNjo0MjozMi4wMDBaIiwicGVyIjoibWU6d3JpdGUiLCJhY3RpZCI6MTIzOTkzMjYsInJnbiI6InVzZTEifQ._QYJKxEcmmUB6-en7MKIPHXw3s-7_lNGDVFBLjNjK18', // Replace with your actual API key
-  '7474497335' // Replace with your actual board ID
+  '7507019243' // Replace with your actual board ID
 );
