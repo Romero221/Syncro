@@ -263,14 +263,17 @@ async function updateOrCreateBoard(filePath, apiKey, boardId) {
 
   // Check if the group already exists or create a new group
   let groupId;
-  const existingGroup = groups.find(group => group.title.trim().toLowerCase() === groupName.trim().toLowerCase());
+  const existingGroup = groups.find(
+    (group) =>
+      group.title.trim().toLowerCase() === groupName.trim().toLowerCase()
+  );
   if (existingGroup) {
     groupId = existingGroup.id;
     console.log(`Group "${groupName}" already exists with ID: ${groupId}`);
   } else {
     groupId = await createGroup(boardId, groupName, apiKey);
     if (!groupId) {
-      console.error('Failed to create group.');
+      console.error("Failed to create group.");
       return;
     }
     console.log(`Created new group: ${groupName} with ID: ${groupId}`);
@@ -278,18 +281,21 @@ async function updateOrCreateBoard(filePath, apiKey, boardId) {
 
   // Fetch existing columns on the board
   const existingColumns = await fetchColumns(boardId, apiKey);
-  const existingColumnTitles = existingColumns.map(col => col.title.trim().toLowerCase());
+  const existingColumnTitles = existingColumns.map((col) =>
+    col.title.trim().toLowerCase()
+  );
 
-  console.log('Existing columns:', existingColumnTitles);
+  console.log("Existing columns:", existingColumnTitles);
 
   // No need to create the "Year" column as it's the default item name column
   const columnIdMap = {}; // To store the mapping between column titles and their IDs in Monday.com
-  console.log(`Skipping "Year" column creation as it is the item name column.`);
+  console.log('Skipping "Year" column creation as it is the item name column.');
 
   // Create or match the remaining columns from the Excel sheet (starting from the 2nd column onward)
-  const excelColumns = Object.keys(excelData[0]).map(col => col.trim()); // Get column headers from Excel file and trim them
+  const excelColumns = Object.keys(excelData[0]).map((col) => col.trim()); // Get column headers from Excel file and trim them
 
-  for (let i = 1; i < excelColumns.length; i++) { // Skip the first "Year" column, as it was handled separately
+  for (let i = 1; i < excelColumns.length; i++) {
+    // Skip the first "Year" column, as it was handled separately
     const excelColumn = excelColumns[i];
     if (!existingColumnTitles.includes(excelColumn.toLowerCase())) {
       // Create column if it doesn't exist
@@ -298,15 +304,25 @@ async function updateOrCreateBoard(filePath, apiKey, boardId) {
       console.log(`Created column: ${excelColumn} with ID: ${newColumnId}`);
     } else {
       // Map existing column if it already exists
-      const existingColumn = existingColumns.find(col => col.title.trim().toLowerCase() === excelColumn.toLowerCase());
+      const existingColumn = existingColumns.find(
+        (col) =>
+          col.title.trim().toLowerCase() === excelColumn.toLowerCase()
+      );
       columnIdMap[excelColumn] = existingColumn.id;
-      console.log(`Column "${excelColumn}" already exists with ID: ${existingColumn.id}`);
+      console.log(
+        `Column "${excelColumn}" already exists with ID: ${existingColumn.id}`
+      );
     }
   }
 
   // Delete columns that exist on the board but are not in the Excel sheet
   for (let existingColumn of existingColumns) {
-    if (!excelColumns.some(excelCol => excelCol.toLowerCase() === existingColumn.title.trim().toLowerCase())) {
+    if (
+      !excelColumns.some(
+        (excelCol) =>
+          excelCol.toLowerCase() === existingColumn.title.trim().toLowerCase()
+      )
+    ) {
       console.log(`Deleting extra column: ${existingColumn.title}`);
       await deleteColumn(boardId, existingColumn.id, apiKey);
     }
@@ -320,19 +336,34 @@ async function updateOrCreateBoard(filePath, apiKey, boardId) {
     // Map Excel data to Monday.com columns using the correct column IDs, skipping the 'Year' column
     for (let i = 1; i < excelColumns.length; i++) {
       const column = excelColumns[i].trim();
-      columnValues[columnIdMap[column]] = { text: String(row[column]).trim() };
+      columnValues[columnIdMap[column]] = String(row[column]).trim();
     }
 
-    // Now dynamically create the item in the group, with the year as the item name and the rest of the data
+    // Now dynamically create the item in the group, with the year as the item name
     console.log(`Creating item for year ${year} in group ${groupName}`);
-    const newItemId = await createItemInGroup(boardId, groupId, year, columnValues, apiKey);  // Use 'year' as the item name
+    const newItemId = await createItemInGroup(
+      boardId,
+      groupId,
+      year,
+      columnValues,
+      apiKey
+    ); // Use 'year' as the item name
     console.log(`Created new item for year: ${year} (ID: ${newItemId})`);
+
+    // Wait 1 second before updating the item with the rest of the column values
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    // Update the item with the rest of the column values
+    console.log(`Updating item ID ${newItemId} with column values.`);
+    await updateItem(boardId, newItemId, columnValues, apiKey);
+    console.log(`Updated item ID ${newItemId} with column values.`);
   }
 }
+
 
 // Call the function with your Excel file path, API key, and board ID
 updateOrCreateBoard(
   'Acura Pre-Qual Long Sheet v6.3.xlsx',
   'eyJhbGciOiJIUzI1NiJ9.eyJ0aWQiOjQwNzM1MzIxNywiYWFpIjoxMSwidWlkIjo0MTI5ODM0MCwiaWFkIjoiMjAyNC0wOS0wNlQxNjo0MjozMi4wMDBaIiwicGVyIjoibWU6d3JpdGUiLCJhY3RpZCI6MTIzOTkzMjYsInJnbiI6InVzZTEifQ._QYJKxEcmmUB6-en7MKIPHXw3s-7_lNGDVFBLjNjK18', // Replace with your actual API key
-  '7511416824' // Replace with your actual board ID
+  '7585507351' // Replace with your actual board ID
 );
