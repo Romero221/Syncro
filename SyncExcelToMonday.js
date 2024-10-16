@@ -334,6 +334,42 @@ async function deleteGroup(boardId, groupId, apiKey) {
     }
 }
 
+// Function to archive a group on the board
+async function archiveGroup(boardId, groupId, apiKey) {
+    const mutation = `
+    mutation($boardId: ID!, $groupId: String!) {
+      archive_group(board_id: $boardId, group_id: $groupId) {
+        id
+      }
+    }
+  `;
+
+    const variables = {
+        boardId: parseInt(boardId),
+        groupId: groupId,
+    };
+
+    try {
+        const response = await axios.post(
+            'https://api.monday.com/v2',
+            { query: mutation, variables },
+            {
+                headers: { Authorization: apiKey },
+            }
+        );
+
+        if (response.data.errors) {
+            console.error('GraphQL errors:', response.data.errors);
+            return null;
+        }
+
+        console.log(`Archived group with ID: ${groupId}`);
+        return response.data.data.archive_group.id;
+    } catch (error) {
+        console.error('Error archiving group:', error);
+        return null;
+    }
+}
 
 // Main function to update or create board based on Excel file and ensure columns match
 async function updateOrCreateBoard(filePath, apiKey, boardId) {
@@ -350,26 +386,28 @@ async function updateOrCreateBoard(filePath, apiKey, boardId) {
             group.title.trim().toLowerCase() === groupName.trim().toLowerCase()
     );
     if (existingGroup) {
-        // Delete the existing group
-        console.log(`Group "${groupName}" already exists with ID: ${existingGroup.id}. Deleting group.`);
-        await deleteGroup(boardId, existingGroup.id, apiKey);
+        // Archive the existing group
+        console.log(
+            `Group "${groupName}" already exists with ID: ${existingGroup.id}. Archiving group.`
+        );
+        await archiveGroup(boardId, existingGroup.id, apiKey);
     }
 
     // Create the group
     groupId = await createGroup(boardId, groupName, apiKey);
     if (!groupId) {
-        console.error("Failed to create group.");
+        console.error('Failed to create group.');
         return;
     }
     console.log(`Created new group: ${groupName} with ID: ${groupId}`);
 
     // Fetch existing columns on the board
-    const existingColumns = await fetchColumns(boardId, apiKey);
-    const existingColumnTitles = existingColumns.map((col) =>
+    let existingColumns = await fetchColumns(boardId, apiKey);
+    let existingColumnTitles = existingColumns.map((col) =>
         col.title.trim().toLowerCase()
     );
 
-    console.log("Existing columns:", existingColumnTitles);
+    console.log('Existing columns:', existingColumnTitles);
 
     // No need to create the "Year" column as it's the default item name column
     const columnIdMap = {}; // To store the mapping between column titles and their IDs in Monday.com
@@ -399,10 +437,37 @@ async function updateOrCreateBoard(filePath, apiKey, boardId) {
         }
     }
 
-    // Delete columns that exist on the board but are not in the Excel sheet
+    // Ensure 'Comment' column exists at the very end and is not deleted
+    const commentColumnTitle = 'Comment';
+    let commentColumn = existingColumns.find(
+        (col) => col.title.trim().toLowerCase() === commentColumnTitle.toLowerCase()
+    );
+    if (!commentColumn) {
+        // Create 'Comment' column if it doesn't exist
+        const newCommentColumnId = await createColumn(
+            boardId,
+            commentColumnTitle,
+            apiKey
+        );
+        console.log(`Created 'Comment' column with ID: ${newCommentColumnId}`);
+        commentColumn = { id: newCommentColumnId, title: commentColumnTitle };
+        existingColumns.push(commentColumn);
+        existingColumnTitles.push(commentColumnTitle.toLowerCase());
+    } else {
+        console.log(`'Comment' column already exists with ID: ${commentColumn.id}`);
+    }
+
+    // Update existingColumns and existingColumnTitles to include the new 'Comment' column
+    existingColumns = await fetchColumns(boardId, apiKey);
+    existingColumnTitles = existingColumns.map((col) =>
+        col.title.trim().toLowerCase()
+    );
+
+    // Delete columns that exist on the board but are not in the Excel sheet, excluding 'Name' and 'Comment' columns
     for (let existingColumn of existingColumns) {
         if (
             existingColumn.title.trim().toLowerCase() !== 'name' && // Do not delete the 'Name' column
+            existingColumn.title.trim().toLowerCase() !== 'comment' && // Do not delete the 'Comment' column
             !excelColumns.some(
                 (excelCol) =>
                     excelCol.toLowerCase() === existingColumn.title.trim().toLowerCase()
@@ -444,7 +509,6 @@ async function updateOrCreateBoard(filePath, apiKey, boardId) {
         console.log(`Updated item ID ${newItemId} with column values.`);
     }
 }
-
 
 // Call the function with your Excel file path, API key, and board ID
 updateOrCreateBoard(
