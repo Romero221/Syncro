@@ -48,7 +48,7 @@ async function fetchGroups(boardId, apiKey) {
     }
 }
 
-// Function to create a new group on the board
+// Function to create a new group on the boards
 async function createGroup(boardId, groupTitle, apiKey) {
     const mutation = `
     mutation($boardId: ID!, $groupTitle: String!) {
