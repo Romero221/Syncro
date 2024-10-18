@@ -6,4 +6,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
     selectFile: () => ipcRenderer.invoke('select-file'),
     startProcessing: (args) => ipcRenderer.send('start-processing', args),
     onProcessingResult: (callback) => ipcRenderer.on('processing-result', callback),
+    onLogMessage: (callback) => ipcRenderer.on('log-message', callback),
 });

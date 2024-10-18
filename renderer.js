@@ -34,4 +34,10 @@ window.electronAPI.onProcessingResult((event, result) => {
     } else {
         logDiv.textContent += `Error: ${result.message}\n`;
     }
+    logDiv.scrollTop = logDiv.scrollHeight; // Auto-scroll to the bottom
+});
+
+window.electronAPI.onLogMessage((event, message) => {
+    logDiv.textContent += message + '\n';
+    logDiv.scrollTop = logDiv.scrollHeight; // Auto-scroll to the bottom
 });

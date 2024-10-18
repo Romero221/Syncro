@@ -6,26 +6,47 @@ const xlsx = require('xlsx');
 const axios = require('axios');
 const fs = require('fs');
 
+let mainWindow;
+
+// Custom logging function
+function setupLogging() {
+    const log = console.log;
+    console.log = function (...args) {
+        log.apply(console, args); // Log to the console as usual
+
+        // Send log messages to renderer
+        if (mainWindow && mainWindow.webContents) {
+            mainWindow.webContents.send('log-message', args.join(' '));
+        }
+    };
+}
+
 // Function to create the main window
 function createWindow() {
-    const win = new BrowserWindow({
+    mainWindow = new BrowserWindow({
         width: 600,
         height: 500,
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
-            // Remove nodeIntegration and contextIsolation settings
+            // nodeIntegration: true, // Not needed with preload script
+            // contextIsolation: false, // We use contextBridge in preload.js
         },
     });
 
-    win.loadFile('index.html');
+    mainWindow.loadFile('index.html');
 
     // Open DevTools for debugging (optional)
-    // win.webContents.openDevTools();
+    // mainWindow.webContents.openDevTools();
+
+    mainWindow.on('closed', () => {
+        mainWindow = null;
+    });
 }
 
 // When the app is ready, create the window
 app.whenReady().then(() => {
     createWindow();
+    setupLogging(); // Initialize custom logging
 
     app.on('activate', function () {
         if (BrowserWindow.getAllWindows().length === 0) createWindow();
