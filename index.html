@@ -1,0 +1,53 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8" />
+    <title>Sync Excel to Monday.com</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        input[type='text'] {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 15px;
+        }
+
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+        }
+
+        #log {
+            margin-top: 20px;
+            white-space: pre-wrap;
+            background: #f0f0f0;
+            padding: 10px;
+            height: 200px;
+            overflow-y: scroll;
+            border: 1px solid #ccc;
+        }
+    </style>
+</head>
+<body>
+    <h1>Sync Excel to Monday.com</h1>
+    <label for="boardId">Board ID:</label>
+    <input type="text" id="boardId" />
+    <label for="apiKey">API Key:</label>
+    <input type="text" id="apiKey" />
+    <label for="filePath">Excel File:</label>
+    <input type="text" id="filePath" readonly />
+    <button id="selectFile">Select File</button>
+    <br /><br />
+    <button id="start">Start Processing</button>
+    <div id="log"></div>
+    <script src="renderer.js"></script>
+</body>
+</html>

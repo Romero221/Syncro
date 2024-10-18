@@ -1,6 +1,68 @@
+// SyncExcelToMonday.js
+
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const path = require('path');
 const xlsx = require('xlsx');
 const axios = require('axios');
-const path = require('path');
+const fs = require('fs');
+
+// Function to create the main window
+function createWindow() {
+    const win = new BrowserWindow({
+        width: 600,
+        height: 500,
+        webPreferences: {
+            preload: path.join(__dirname, 'preload.js'),
+            // Remove nodeIntegration and contextIsolation settings
+        },
+    });
+
+    win.loadFile('index.html');
+
+    // Open DevTools for debugging (optional)
+    // win.webContents.openDevTools();
+}
+
+// When the app is ready, create the window
+app.whenReady().then(() => {
+    createWindow();
+
+    app.on('activate', function () {
+        if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
+});
+
+// Quit when all windows are closed
+app.on('window-all-closed', function () {
+    if (process.platform !== 'darwin') app.quit();
+});
+
+// IPC handlers for communication between renderer and main processes
+ipcMain.handle('select-file', async () => {
+    const result = await dialog.showOpenDialog({
+        properties: ['openFile'],
+        filters: [{ name: 'Excel Files', extensions: ['xlsx', 'xls'] }],
+    });
+    if (result.canceled) {
+        return null;
+    } else {
+        return result.filePaths[0];
+    }
+});
+
+ipcMain.on('start-processing', async (event, args) => {
+    const { boardId, apiKey, filePath } = args;
+
+    try {
+        await updateOrCreateBoard(filePath, apiKey, boardId);
+        event.reply('processing-result', { success: true, message: 'Done!' });
+    } catch (error) {
+        console.error('An error occurred:', error);
+        event.reply('processing-result', { success: false, message: error.message });
+    }
+});
+
+// Your existing functions start here
 
 // Function to read Excel data
 function readExcelFile(filePath) {
@@ -32,9 +94,13 @@ async function fetchGroups(boardId, apiKey) {
     const variables = { boardId: parseInt(boardId) };
 
     try {
-        const response = await axios.post('https://api.monday.com/v2', { query, variables }, {
-            headers: { Authorization: apiKey }
-        });
+        const response = await axios.post(
+            'https://api.monday.com/v2',
+            { query, variables },
+            {
+                headers: { Authorization: apiKey },
+            }
+        );
 
         if (response.data.errors) {
             console.error('GraphQL errors:', response.data.errors);
@@ -48,7 +114,7 @@ async function fetchGroups(boardId, apiKey) {
     }
 }
 
-// Function to create a new group on the boards
+// Function to create a new group on the board
 async function createGroup(boardId, groupTitle, apiKey) {
     const mutation = `
     mutation($boardId: ID!, $groupTitle: String!) {
@@ -60,13 +126,17 @@ async function createGroup(boardId, groupTitle, apiKey) {
 
     const variables = {
         boardId: parseInt(boardId),
-        groupTitle
+        groupTitle,
     };
 
     try {
-        const response = await axios.post('https://api.monday.com/v2', { query: mutation, variables }, {
-            headers: { Authorization: apiKey }
-        });
+        const response = await axios.post(
+            'https://api.monday.com/v2',
+            { query: mutation, variables },
+            {
+                headers: { Authorization: apiKey },
+            }
+        );
 
         if (response.data.errors) {
             console.error('GraphQL errors:', response.data.errors);
@@ -76,6 +146,43 @@ async function createGroup(boardId, groupTitle, apiKey) {
         return response.data.data.create_group.id;
     } catch (error) {
         console.error('Error creating group:', error);
+    }
+}
+
+// Function to delete a group from the board
+async function deleteGroup(boardId, groupId, apiKey) {
+    const mutation = `
+    mutation($boardId: ID!, $groupId: String!) {
+      delete_group(board_id: $boardId, group_id: $groupId) {
+        id
+      }
+    }
+  `;
+
+    const variables = {
+        boardId: parseInt(boardId),
+        groupId: groupId,
+    };
+
+    try {
+        const response = await axios.post(
+            'https://api.monday.com/v2',
+            { query: mutation, variables },
+            {
+                headers: { Authorization: apiKey },
+            }
+        );
+
+        if (response.data.errors) {
+            console.error('GraphQL errors:', response.data.errors);
+            return null;
+        }
+
+        console.log(`Deleted group with ID: ${groupId}`);
+        return response.data.data.delete_group.id;
+    } catch (error) {
+        console.error('Error deleting group:', error);
+        return null;
     }
 }
 
@@ -95,9 +202,13 @@ async function fetchColumns(boardId, apiKey) {
     const variables = { boardId: parseInt(boardId) };
 
     try {
-        const response = await axios.post('https://api.monday.com/v2', { query, variables }, {
-            headers: { Authorization: apiKey }
-        });
+        const response = await axios.post(
+            'https://api.monday.com/v2',
+            { query, variables },
+            {
+                headers: { Authorization: apiKey },
+            }
+        );
 
         if (response.data.errors) {
             console.error('GraphQL errors:', response.data.errors);
@@ -124,13 +235,17 @@ async function createColumn(boardId, columnTitle, apiKey) {
     const variables = {
         boardId: parseInt(boardId),
         columnTitle,
-        columnType: "text"
+        columnType: 'text',
     };
 
     try {
-        const response = await axios.post('https://api.monday.com/v2', { query: mutation, variables }, {
-            headers: { Authorization: apiKey }
-        });
+        const response = await axios.post(
+            'https://api.monday.com/v2',
+            { query: mutation, variables },
+            {
+                headers: { Authorization: apiKey },
+            }
+        );
 
         if (response.data.errors) {
             console.error('GraphQL errors:', response.data.errors);
@@ -143,8 +258,44 @@ async function createColumn(boardId, columnTitle, apiKey) {
     }
 }
 
+// Function to delete a column from the board
+async function deleteColumn(boardId, columnId, apiKey) {
+    const mutation = `
+    mutation($boardId: ID!, $columnId: String!) {
+      delete_column(board_id: $boardId, column_id: $columnId) {
+        id
+      }
+    }
+  `;
+
+    const variables = {
+        boardId: parseInt(boardId),
+        columnId: columnId,
+    };
+
+    try {
+        const response = await axios.post(
+            'https://api.monday.com/v2',
+            { query: mutation, variables },
+            {
+                headers: { Authorization: apiKey },
+            }
+        );
+
+        if (response.data.errors) {
+            console.error('GraphQL errors:', response.data.errors);
+            return null;
+        }
+
+        console.log(`Deleted column with ID: ${columnId}`);
+        return response.data.data.delete_column.id;
+    } catch (error) {
+        console.error('Error deleting column:', error);
+    }
+}
+
 // Function to create a new item in a specific group on the board (with year as item name)
-async function createItemInGroup(boardId, groupId, itemName, columnValues, apiKey) {
+async function createItemInGroup(boardId, groupId, itemName, apiKey) {
     const mutation = `
     mutation($boardId: ID!, $groupId: String!, $itemName: String!) {
       create_item(board_id: $boardId, group_id: $groupId, item_name: $itemName) {
@@ -154,28 +305,35 @@ async function createItemInGroup(boardId, groupId, itemName, columnValues, apiKe
   `;
 
     const variables = {
-        boardId: boardId,  // Ensure this is passed as an integer
-        groupId: groupId,  // Ensure this is passed as a string
-        itemName: itemName  // The Year from Excel, this is the "item name" for the first slot
+        boardId: parseInt(boardId),
+        groupId: groupId,
+        itemName: itemName,
     };
 
     try {
-        const response = await axios.post('https://api.monday.com/v2', { query: mutation, variables }, {
-            headers: { Authorization: apiKey }
-        });
+        const response = await axios.post(
+            'https://api.monday.com/v2',
+            { query: mutation, variables },
+            {
+                headers: { Authorization: apiKey },
+            }
+        );
 
         if (response.data.errors) {
             console.error('GraphQL errors:', response.data.errors);
             return null;
         }
 
-        if (response.data && response.data.data && response.data.data.create_item) {
-            return response.data.data.create_item.id;  // Return the new item's ID
+        if (
+            response.data &&
+            response.data.data &&
+            response.data.data.create_item
+        ) {
+            return response.data.data.create_item.id;
         } else {
             console.error('Unexpected response structure:', response.data);
             return null;
         }
-
     } catch (error) {
         console.error('Error creating new item in group:', error);
         throw new Error('Failed to create item in group');
@@ -193,160 +351,9 @@ async function updateItem(boardId, itemId, columnValues, apiKey) {
   `;
 
     const variables = {
-        boardId: boardId,  // Ensure this is passed as an integer
-        itemId: itemId,    // The newly created item's ID
-        columnValues: JSON.stringify(columnValues)  // Convert the column values to JSON
-    };
-
-    try {
-        const response = await axios.post('https://api.monday.com/v2', { query: mutation, variables }, {
-            headers: { Authorization: apiKey }
-        });
-
-        if (response.data.errors) {
-            console.error('GraphQL errors:', response.data.errors);
-            return null;
-        }
-
-        if (response.data && response.data.data && response.data.data.change_multiple_column_values) {
-            return response.data.data.change_multiple_column_values.id;
-        } else {
-            console.error('Unexpected response structure:', response.data);
-            return null;
-        }
-
-    } catch (error) {
-        console.error('Error updating item:', error);
-        throw new Error('Failed to update item');
-    }
-}
-
-// Function to delete a column from the board
-async function deleteColumn(boardId, columnId, apiKey) {
-    const mutation = `
-    mutation($boardId: ID!, $columnId: String!) {
-      delete_column(board_id: $boardId, column_id: $columnId) {
-        id
-      }
-    }
-  `;
-
-    const variables = {
         boardId: parseInt(boardId),
-        columnId: columnId
-    };
-
-    try {
-        const response = await axios.post('https://api.monday.com/v2', { query: mutation, variables }, {
-            headers: { Authorization: apiKey }
-        });
-
-        if (response.data.errors) {
-            console.error('GraphQL errors:', response.data.errors);
-            return null;
-        }
-
-        console.log(`Deleted column with ID: ${columnId}`);
-        return response.data.data.delete_column.id;
-    } catch (error) {
-        console.error('Error deleting column:', error);
-    }
-}
-
-// Function to fetch existing items in a specific group on the board
-async function fetchItemsInGroup(boardId, groupId, apiKey) {
-    const query = `
-    query ($boardId: [Int], $groupId: String!) {
-      boards (ids: $boardId) {
-        groups(ids: [$groupId]) {
-          id
-          items {
-            id
-            name
-            column_values {
-              id
-              title
-              text
-            }
-          }
-        }
-      }
-    }
-  `;
-
-    const variables = {
-        boardId: parseInt(boardId),
-        groupId: groupId,
-    };
-
-    try {
-        const response = await axios.post(
-            'https://api.monday.com/v2',
-            { query, variables },
-            {
-                headers: { Authorization: apiKey },
-            }
-        );
-
-        if (response.data.errors) {
-            console.error('GraphQL errors:', response.data.errors);
-            return [];
-        }
-
-        return response.data.data.boards[0].groups[0].items;
-    } catch (error) {
-        console.error('Error fetching items in group:', error);
-        return [];
-    }
-}
-
-
-// Function to delete a group from the board
-async function deleteGroup(boardId, groupId, apiKey) {
-    const mutation = `
-    mutation($boardId: ID!, $groupId: String!) {
-      delete_group(board_id: $boardId, group_id: $groupId) {
-        id
-      }
-    }
-  `;
-
-    const variables = {
-        boardId: parseInt(boardId),
-        groupId: groupId,
-    };
-
-    try {
-        const response = await axios.post('https://api.monday.com/v2', { query: mutation, variables }, {
-            headers: { Authorization: apiKey },
-        });
-
-        if (response.data.errors) {
-            console.error('GraphQL errors:', response.data.errors);
-            return null;
-        }
-
-        console.log(`Deleted group with ID: ${groupId}`);
-        return response.data.data.delete_group.id;
-    } catch (error) {
-        console.error('Error deleting group:', error);
-        return null;
-    }
-}
-
-// Function to archive a group on the board
-async function archiveGroup(boardId, groupId, apiKey) {
-    const mutation = `
-    mutation($boardId: ID!, $groupId: String!) {
-      archive_group(board_id: $boardId, group_id: $groupId) {
-        id
-      }
-    }
-  `;
-
-    const variables = {
-        boardId: parseInt(boardId),
-        groupId: groupId,
+        itemId: parseInt(itemId),
+        columnValues: JSON.stringify(columnValues),
     };
 
     try {
@@ -363,11 +370,19 @@ async function archiveGroup(boardId, groupId, apiKey) {
             return null;
         }
 
-        console.log(`Archived group with ID: ${groupId}`);
-        return response.data.data.archive_group.id;
+        if (
+            response.data &&
+            response.data.data &&
+            response.data.data.change_multiple_column_values
+        ) {
+            return response.data.data.change_multiple_column_values.id;
+        } else {
+            console.error('Unexpected response structure:', response.data);
+            return null;
+        }
     } catch (error) {
-        console.error('Error archiving group:', error);
-        return null;
+        console.error('Error updating item:', error);
+        throw new Error('Failed to update item');
     }
 }
 
@@ -379,22 +394,20 @@ async function updateOrCreateBoard(filePath, apiKey, boardId) {
     // Fetch existing groups on the board
     const groups = await fetchGroups(boardId, apiKey);
 
-    // Check if the group already exists
-    let groupId;
+    // Delete existing group if it matches the groupName
     const existingGroup = groups.find(
         (group) =>
             group.title.trim().toLowerCase() === groupName.trim().toLowerCase()
     );
     if (existingGroup) {
-        // Archive the existing group
         console.log(
-            `Group "${groupName}" already exists with ID: ${existingGroup.id}. Archiving group.`
+            `Group "${groupName}" already exists with ID: ${existingGroup.id}. Deleting group.`
         );
-        await archiveGroup(boardId, existingGroup.id, apiKey);
+        await deleteGroup(boardId, existingGroup.id, apiKey);
     }
 
     // Create the group
-    groupId = await createGroup(boardId, groupName, apiKey);
+    const groupId = await createGroup(boardId, groupName, apiKey);
     if (!groupId) {
         console.error('Failed to create group.');
         return;
@@ -402,8 +415,8 @@ async function updateOrCreateBoard(filePath, apiKey, boardId) {
     console.log(`Created new group: ${groupName} with ID: ${groupId}`);
 
     // Fetch existing columns on the board
-    let existingColumns = await fetchColumns(boardId, apiKey);
-    let existingColumnTitles = existingColumns.map((col) =>
+    const existingColumns = await fetchColumns(boardId, apiKey);
+    const existingColumnTitles = existingColumns.map((col) =>
         col.title.trim().toLowerCase()
     );
 
@@ -427,8 +440,7 @@ async function updateOrCreateBoard(filePath, apiKey, boardId) {
         } else {
             // Map existing column if it already exists
             const existingColumn = existingColumns.find(
-                (col) =>
-                    col.title.trim().toLowerCase() === excelColumn.toLowerCase()
+                (col) => col.title.trim().toLowerCase() === excelColumn.toLowerCase()
             );
             columnIdMap[excelColumn] = existingColumn.id;
             console.log(
@@ -437,37 +449,10 @@ async function updateOrCreateBoard(filePath, apiKey, boardId) {
         }
     }
 
-    // Ensure 'Comment' column exists at the very end and is not deleted
-    const commentColumnTitle = 'Comment';
-    let commentColumn = existingColumns.find(
-        (col) => col.title.trim().toLowerCase() === commentColumnTitle.toLowerCase()
-    );
-    if (!commentColumn) {
-        // Create 'Comment' column if it doesn't exist
-        const newCommentColumnId = await createColumn(
-            boardId,
-            commentColumnTitle,
-            apiKey
-        );
-        console.log(`Created 'Comment' column with ID: ${newCommentColumnId}`);
-        commentColumn = { id: newCommentColumnId, title: commentColumnTitle };
-        existingColumns.push(commentColumn);
-        existingColumnTitles.push(commentColumnTitle.toLowerCase());
-    } else {
-        console.log(`'Comment' column already exists with ID: ${commentColumn.id}`);
-    }
-
-    // Update existingColumns and existingColumnTitles to include the new 'Comment' column
-    existingColumns = await fetchColumns(boardId, apiKey);
-    existingColumnTitles = existingColumns.map((col) =>
-        col.title.trim().toLowerCase()
-    );
-
-    // Delete columns that exist on the board but are not in the Excel sheet, excluding 'Name' and 'Comment' columns
+    // Delete columns that exist on the board but are not in the Excel sheet
     for (let existingColumn of existingColumns) {
         if (
             existingColumn.title.trim().toLowerCase() !== 'name' && // Do not delete the 'Name' column
-            existingColumn.title.trim().toLowerCase() !== 'comment' && // Do not delete the 'Comment' column
             !excelColumns.some(
                 (excelCol) =>
                     excelCol.toLowerCase() === existingColumn.title.trim().toLowerCase()
@@ -489,15 +474,14 @@ async function updateOrCreateBoard(filePath, apiKey, boardId) {
             columnValues[columnIdMap[column]] = String(row[column]).trim();
         }
 
-        // Create new item
+        // Now dynamically create the item in the group, with the year as the item name
         console.log(`Creating new item for year ${year}`);
         const newItemId = await createItemInGroup(
             boardId,
             groupId,
             year,
-            columnValues,
             apiKey
-        );
+        ); // Use 'year' as the item name
         console.log(`Created new item for year: ${year} (ID: ${newItemId})`);
 
         // Wait 1 second before updating the item with the rest of the column values
@@ -510,9 +494,3 @@ async function updateOrCreateBoard(filePath, apiKey, boardId) {
     }
 }
 
-// Call the function with your Excel file path, API key, and board ID
-updateOrCreateBoard(
-    'Acura Pre-Qual Long Sheet v6.3.xlsx',
-    'eyJhbGciOiJIUzI1NiJ9.eyJ0aWQiOjQwNzM1MzIxNywiYWFpIjoxMSwidWlkIjo0MTI5ODM0MCwiaWFkIjoiMjAyNC0wOS0wNlQxNjo0MjozMi4wMDBaIiwicGVyIjoibWU6d3JpdGUiLCJhY3RpZCI6MTIzOTkzMjYsInJnbiI6InVzZTEifQ._QYJKxEcmmUB6-en7MKIPHXw3s-7_lNGDVFBLjNjK18', // Replace with your actual API key
-    '7620820618' // Replace with your actual board ID
-);
