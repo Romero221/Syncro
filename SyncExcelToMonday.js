@@ -24,8 +24,8 @@ function setupLogging() {
 // Function to create the main window
 function createWindow() {
     mainWindow = new BrowserWindow({
-        width: 600,
-        height: 500,
+        width: 1000,
+        height: 900,
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
             // nodeIntegration: true, // Not needed with preload script
@@ -58,16 +58,43 @@ app.on('window-all-closed', function () {
     if (process.platform !== 'darwin') app.quit();
 });
 
-// IPC handlers for communication between renderer and main processes
-ipcMain.handle('select-file', async () => {
-    const result = await dialog.showOpenDialog({
-        properties: ['openFile'],
-        filters: [{ name: 'Excel Files', extensions: ['xlsx', 'xls'] }],
-    });
-    if (result.canceled) {
-        return null;
+// Modify select-file handler
+ipcMain.handle('select-file', async (event, mode) => {
+    if (mode === 'open') {
+        const result = await dialog.showOpenDialog({
+            properties: ['openFile'],
+            filters: [{ name: 'Excel Files', extensions: ['xlsx', 'xls'] }],
+        });
+        if (result.canceled) {
+            return null;
+        } else {
+            return result.filePaths[0];
+        }
     } else {
-        return result.filePaths[0];
+        // For 'save' mode (if needed)
+        const result = await dialog.showSaveDialog({
+            title: 'Save Excel File',
+            defaultPath: 'board_data.xlsx',
+            filters: [{ name: 'Excel Files', extensions: ['xlsx', 'xls'] }],
+        });
+        if (result.canceled) {
+            return null;
+        } else {
+            return result.filePath;
+        }
+    }
+});
+
+// Add a listener for syncing Monday to Excel
+ipcMain.on('sync-monday-to-excel', async (event, args) => {
+    const { boardId, apiKey, filePath } = args;
+
+    try {
+        await syncMondayToExcel(boardId, apiKey, filePath);
+        event.reply('sync-result', { success: true, message: 'Done!' });
+    } catch (error) {
+        console.error('An error occurred:', error);
+        event.reply('sync-result', { success: false, message: error.message });
     }
 });
 
@@ -444,6 +471,159 @@ async function archiveGroup(boardId, groupId, apiKey) {
     }
 }
 
+// Implement the fetchMondayDataForGroup function
+async function fetchMondayDataForBoard(boardId, apiKey) {
+    const query = `
+    query ($boardId: [ID!]!) {
+      boards(ids: $boardId) {
+        columns {
+          id
+          title
+        }
+        items {
+          id
+          name
+          column_values {
+            id
+            title
+            text
+          }
+        }
+      }
+    }
+  `;
+
+    const variables = {
+        boardId: [boardId.toString()],
+    };
+
+    try {
+        const response = await axios.post(
+            'https://api.monday.com/v2',
+            { query, variables },
+            {
+                headers: { Authorization: `Bearer ${apiKey}` },
+            }
+        );
+
+        if (response.data.errors) {
+            console.error('GraphQL errors:', JSON.stringify(response.data.errors, null, 2));
+            return null;
+        }
+
+        const board = response.data.data.boards[0];
+
+        return {
+            columns: board.columns,
+            items: board.items,
+        };
+    } catch (error) {
+        if (error.response && error.response.data) {
+            console.error('Error fetching data from Monday.com:', JSON.stringify(error.response.data, null, 2));
+        } else {
+            console.error('Error fetching data from Monday.com:', error.message);
+        }
+        return null;
+    }
+}
+
+
+// Implement the compareAndUpdateExcelData function
+function compareAndUpdateExcelData(excelData, mondayData) {
+    const updatedExcelData = [...excelData]; // Create a copy of the Excel data
+
+    // Create a mapping from item name (e.g., Year) to item data from Monday.com
+    const mondayItemsMap = {};
+    mondayData.items.forEach((item) => {
+        mondayItemsMap[item.name.trim()] = item;
+    });
+
+    // Map Monday.com columns by title to their IDs for easy lookup
+    const columnIdMap = {};
+    mondayData.columns.forEach((col) => {
+        columnIdMap[col.title.trim()] = col.id;
+    });
+
+    // Loop through each row in the Excel data
+    for (let rowIndex = 0; rowIndex < updatedExcelData.length; rowIndex++) {
+        const excelRow = updatedExcelData[rowIndex];
+        const itemName = String(excelRow.Year).trim(); // Assuming 'Year' is the item name
+
+        const mondayItem = mondayItemsMap[itemName];
+
+        if (mondayItem) {
+            // Compare column values
+            mondayItem.column_values.forEach((colVal) => {
+                const columnTitle = colVal.title.trim();
+                const mondayValue = colVal.text ? colVal.text.trim() : '';
+
+                const excelValue = excelRow[columnTitle]
+                    ? String(excelRow[columnTitle]).trim()
+                    : '';
+
+                if (mondayValue !== excelValue) {
+                    // Update the cell in the Excel data
+                    console.log(
+                        `Updating cell [${itemName}][${columnTitle}]: "${excelValue}" -> "${mondayValue}"`
+                    );
+                    excelRow[columnTitle] = mondayValue; // Update the Excel data
+                }
+            });
+        } else {
+            console.warn(`Item "${itemName}" not found in Monday.com data.`);
+        }
+    }
+
+    return updatedExcelData; // Return the updated Excel data
+}
+
+
+
+// Modify writeDataToExcelFile function if necessary
+function writeDataToExcelFile(dataRows, filePath) {
+    // Convert data to worksheet
+    const worksheet = xlsx.utils.json_to_sheet(dataRows);
+
+    // Create a new workbook and append the worksheet
+    const workbook = xlsx.utils.book_new();
+    xlsx.utils.book_append_sheet(workbook, worksheet, 'Sheet1');
+
+    // Write to file
+    xlsx.writeFile(workbook, filePath);
+}
+
+
+// Implement the syncMondayToExcel function
+async function syncMondayToExcel(boardId, apiKey, filePath) {
+    const groupName = extractManufacturer(filePath); // Extract the group name from the Excel file name
+    console.log(`Group Name extracted from file: ${groupName}`);
+
+    // Read the existing Excel file
+    console.log('Reading existing Excel file...');
+    const excelData = readExcelFile(filePath);
+
+    // Fetch data from Monday.com for the entire board
+    console.log(`Fetching data from board ID: ${boardId}`);
+    const mondayData = await fetchMondayDataForBoard(boardId, apiKey);
+
+    if (!mondayData) {
+        throw new Error('Failed to fetch data from Monday.com.');
+    }
+
+    console.log('Data fetched from Monday.com successfully.');
+
+    // Compare data and update Excel file
+    console.log('Comparing data and updating Excel file...');
+    const updatedExcelData = compareAndUpdateExcelData(excelData, mondayData);
+
+    // Write updated data back to the Excel file
+    writeDataToExcelFile(updatedExcelData, filePath);
+
+    console.log(`Excel file updated successfully at ${filePath}`);
+}
+
+
+
 
 async function updateOrCreateBoard(filePath, apiKey, boardId) {
     const excelData = readExcelFile(filePath);
@@ -582,5 +762,4 @@ async function updateOrCreateBoard(filePath, apiKey, boardId) {
         console.log(`Updated item ID ${newItemId} with column values.`);
     }
 }
-
 
