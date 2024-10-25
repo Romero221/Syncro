@@ -472,22 +472,13 @@ async function archiveGroup(boardId, groupId, apiKey) {
 }
 
 // Implement the fetchMondayDataForGroup function
-async function fetchMondayDataForBoard(boardId, apiKey) {
+async function getGroupId(boardId, apiKey, groupName) {
     const query = `
     query ($boardId: [ID!]!) {
       boards(ids: $boardId) {
-        columns {
+        groups {
           id
           title
-        }
-        items {
-          id
-          name
-          column_values {
-            id
-            title
-            text
-          }
         }
       }
     }
@@ -511,17 +502,87 @@ async function fetchMondayDataForBoard(boardId, apiKey) {
             return null;
         }
 
-        const board = response.data.data.boards[0];
+        const groups = response.data.data.boards[0].groups;
 
-        return {
-            columns: board.columns,
-            items: board.items,
-        };
+        // Find the group by title
+        const group = groups.find(
+            (g) => g.title.trim().toLowerCase() === groupName.trim().toLowerCase()
+        );
+
+        if (!group) {
+            console.error(`Group "${groupName}" not found on the board.`);
+            return null;
+        }
+
+        return group.id;
     } catch (error) {
         if (error.response && error.response.data) {
-            console.error('Error fetching data from Monday.com:', JSON.stringify(error.response.data, null, 2));
+            console.error(
+                'Error fetching groups from Monday.com:',
+                JSON.stringify(error.response.data, null, 2)
+            );
         } else {
-            console.error('Error fetching data from Monday.com:', error.message);
+            console.error('Error fetching groups from Monday.com:', error.message);
+        }
+        return null;
+    }
+}
+
+
+async function fetchItemsByGroup(boardId, groupId, apiKey) {
+    const query = `
+    query ($boardId: [ID!]!, $groupId: String!) {
+      boards(ids: $boardId) {
+        items_by_group(group_id: $groupId) {
+          id
+          name
+          column_values {
+            title
+            text
+          }
+        }
+      }
+    }
+  `;
+
+    const variables = {
+        boardId: [boardId.toString()],
+        groupId: groupId,
+    };
+
+    try {
+        const response = await axios.post(
+            'https://api.monday.com/v2',
+            { query, variables },
+            {
+                headers: { Authorization: `Bearer ${apiKey}` },
+            }
+        );
+
+        if (response.data.errors) {
+            console.error(
+                'GraphQL errors:',
+                JSON.stringify(response.data.errors, null, 2)
+            );
+            return null;
+        }
+
+        const items = response.data.data.boards[0].items_by_group;
+
+        if (!items || items.length === 0) {
+            console.error(`No items found in group "${groupId}".`);
+            return null;
+        }
+
+        return items;
+    } catch (error) {
+        if (error.response && error.response.data) {
+            console.error(
+                'Error fetching items from Monday.com:',
+                JSON.stringify(error.response.data, null, 2)
+            );
+        } else {
+            console.error('Error fetching items from Monday.com:', error.message);
         }
         return null;
     }
@@ -602,15 +663,30 @@ async function syncMondayToExcel(boardId, apiKey, filePath) {
     console.log('Reading existing Excel file...');
     const excelData = readExcelFile(filePath);
 
-    // Fetch data from Monday.com for the entire board
-    console.log(`Fetching data from board ID: ${boardId}`);
-    const mondayData = await fetchMondayDataForBoard(boardId, apiKey);
+    // Fetch the Group ID
+    console.log(`Fetching group ID for group: ${groupName}`);
+    const groupId = await getGroupId(boardId, apiKey, groupName);
 
-    if (!mondayData) {
-        throw new Error('Failed to fetch data from Monday.com.');
+    if (!groupId) {
+        throw new Error('Failed to fetch group ID from Monday.com.');
+    }
+
+    console.log(`Group ID for "${groupName}" is ${groupId}`);
+
+    // Fetch items from the group
+    console.log(`Fetching items from group ID: ${groupId}`);
+    const mondayItems = await fetchItemsByGroup(boardId, groupId, apiKey);
+
+    if (!mondayItems) {
+        throw new Error('Failed to fetch items from Monday.com.');
     }
 
     console.log('Data fetched from Monday.com successfully.');
+
+    // Prepare Monday.com data for comparison
+    const mondayData = {
+        items: mondayItems,
+    };
 
     // Compare data and update Excel file
     console.log('Comparing data and updating Excel file...');
@@ -621,6 +697,9 @@ async function syncMondayToExcel(boardId, apiKey, filePath) {
 
     console.log(`Excel file updated successfully at ${filePath}`);
 }
+
+
+
 
 
 
