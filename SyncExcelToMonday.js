@@ -114,11 +114,37 @@ ipcMain.on('start-processing', async (event, args) => {
 
 // Function to read Excel data
 function readExcelFile(filePath) {
-    const workbook = xlsx.readFile(filePath);
+    const workbook = xlsx.readFile(filePath, { cellStyles: true });
     const sheetName = workbook.SheetNames[0];
     const sheet = workbook.Sheets[sheetName];
-    return xlsx.utils.sheet_to_json(sheet);
+
+    // Convert the sheet to JSON, but preserve cell structure
+    const excelData = xlsx.utils.sheet_to_json(sheet, { defval: null, header: 1 });
+
+    return { workbook, sheet, excelData };
 }
+
+function writeDataToExcelFile(dataRows, workbook, sheet, filePath) {
+    dataRows.forEach((row, rowIndex) => {
+        // Skip the header row
+        if (rowIndex === 0) return;
+
+        row.forEach((value, colIndex) => {
+            const cellAddress = xlsx.utils.encode_cell({ r: rowIndex, c: colIndex });
+            const cell = sheet[cellAddress];
+
+            if (cell && cell.v !== value) {
+                // Only update the value if it’s different, preserving the original cell format
+                cell.v = value;
+            }
+        });
+    });
+
+    // Write the workbook back to the file
+    xlsx.writeFile(workbook, filePath);
+}
+
+
 
 // Function to extract the manufacturer (first word) from the file name
 function extractManufacturer(fileName) {
@@ -529,16 +555,29 @@ async function getGroupId(boardId, apiKey, groupName) {
 }
 
 
+// Function to fetch all items on the board and filter by group ID
 async function fetchItemsByGroup(boardId, groupId, apiKey) {
+    let items = [];
+    let cursor = null;
+
     const query = `
-    query ($boardId: [ID!]!, $groupId: String!) {
+    query ($boardId: [ID!]!, $limit: Int, $cursor: String) {
       boards(ids: $boardId) {
-        items_by_group(group_id: $groupId) {
-          id
-          name
-          column_values {
-            title
-            text
+        items_page(limit: $limit, cursor: $cursor) {
+          cursor
+          items {
+            id
+            name
+            group {
+              id
+            }
+            column_values {
+              column {
+                title
+              }
+              text
+              value
+            }
           }
         }
       }
@@ -547,34 +586,53 @@ async function fetchItemsByGroup(boardId, groupId, apiKey) {
 
     const variables = {
         boardId: [boardId.toString()],
-        groupId: groupId,
+        limit: 500,
     };
 
     try {
-        const response = await axios.post(
-            'https://api.monday.com/v2',
-            { query, variables },
-            {
-                headers: { Authorization: `Bearer ${apiKey}` },
+        // Loop until there are no more pages (cursor is null)
+        do {
+            // Include the cursor in variables if it's not the first page
+            if (cursor) {
+                variables.cursor = cursor;
+            } else {
+                delete variables.cursor;
             }
-        );
 
-        if (response.data.errors) {
-            console.error(
-                'GraphQL errors:',
-                JSON.stringify(response.data.errors, null, 2)
+            const response = await axios.post(
+                'https://api.monday.com/v2',
+                { query, variables },
+                {
+                    headers: { Authorization: `Bearer ${apiKey}` },
+                }
             );
-            return null;
-        }
 
-        const items = response.data.data.boards[0].items_by_group;
+            if (response.data.errors) {
+                console.error(
+                    'GraphQL errors:',
+                    JSON.stringify(response.data.errors, null, 2)
+                );
+                return null;
+            }
 
-        if (!items || items.length === 0) {
+            // Append the items from the current page
+            const pageItems = response.data.data.boards[0].items_page.items;
+            items = items.concat(pageItems);
+
+            // Update the cursor for the next page
+            cursor = response.data.data.boards[0].items_page.cursor;
+
+        } while (cursor); // Continue if there's a next page
+
+        // Filter the items by the specified group ID
+        const filteredItems = items.filter(item => item.group.id === groupId);
+
+        if (!filteredItems || filteredItems.length === 0) {
             console.error(`No items found in group "${groupId}".`);
             return null;
         }
 
-        return items;
+        return filteredItems;
     } catch (error) {
         if (error.response && error.response.data) {
             console.error(
@@ -591,43 +649,36 @@ async function fetchItemsByGroup(boardId, groupId, apiKey) {
 
 // Implement the compareAndUpdateExcelData function
 function compareAndUpdateExcelData(excelData, mondayData) {
-    const updatedExcelData = [...excelData]; // Create a copy of the Excel data
-
-    // Create a mapping from item name (e.g., Year) to item data from Monday.com
     const mondayItemsMap = {};
-    mondayData.items.forEach((item) => {
-        mondayItemsMap[item.name.trim()] = item;
-    });
+    if (mondayData && mondayData.items) {
+        mondayData.items.forEach((item) => {
+            mondayItemsMap[item.name.trim()] = item;
+        });
+    } else {
+        console.error("Monday.com data is empty or undefined.");
+        return excelData; // Return unmodified data if no items from Monday.com
+    }
 
-    // Map Monday.com columns by title to their IDs for easy lookup
-    const columnIdMap = {};
-    mondayData.columns.forEach((col) => {
-        columnIdMap[col.title.trim()] = col.id;
-    });
+    // Create a clone to avoid modifying the original data
+    const updatedExcelData = [...excelData];
 
-    // Loop through each row in the Excel data
-    for (let rowIndex = 0; rowIndex < updatedExcelData.length; rowIndex++) {
+    // Start comparison row by row, starting from the second row assuming headers are in the first row
+    for (let rowIndex = 1; rowIndex < updatedExcelData.length; rowIndex++) {
         const excelRow = updatedExcelData[rowIndex];
-        const itemName = String(excelRow.Year).trim(); // Assuming 'Year' is the item name
-
+        const itemName = excelRow[0]?.toString().trim(); // Assuming the first column is the unique identifier
         const mondayItem = mondayItemsMap[itemName];
 
         if (mondayItem) {
-            // Compare column values
-            mondayItem.column_values.forEach((colVal) => {
-                const columnTitle = colVal.title.trim();
-                const mondayValue = colVal.text ? colVal.text.trim() : '';
-
-                const excelValue = excelRow[columnTitle]
-                    ? String(excelRow[columnTitle]).trim()
-                    : '';
+            // Compare each cell in the row
+            mondayItem.column_values.forEach((colVal, colIndex) => {
+                const mondayValue = colVal.text ? colVal.text.trim() : "";
+                const excelValue = excelRow[colIndex] ? excelRow[colIndex].toString().trim() : "";
 
                 if (mondayValue !== excelValue) {
-                    // Update the cell in the Excel data
                     console.log(
-                        `Updating cell [${itemName}][${columnTitle}]: "${excelValue}" -> "${mondayValue}"`
+                        `Updating cell [Row ${rowIndex + 1}][Column ${colIndex}]: "${excelValue}" -> "${mondayValue}"`
                     );
-                    excelRow[columnTitle] = mondayValue; // Update the Excel data
+                    excelRow[colIndex] = mondayValue; // Update value in the cloned data
                 }
             });
         } else {
@@ -635,7 +686,7 @@ function compareAndUpdateExcelData(excelData, mondayData) {
         }
     }
 
-    return updatedExcelData; // Return the updated Excel data
+    return updatedExcelData; // Return only the modified values
 }
 
 
@@ -659,9 +710,9 @@ async function syncMondayToExcel(boardId, apiKey, filePath) {
     const groupName = extractManufacturer(filePath); // Extract the group name from the Excel file name
     console.log(`Group Name extracted from file: ${groupName}`);
 
-    // Read the existing Excel file
+    // Read the existing Excel file with formatting
     console.log('Reading existing Excel file...');
-    const excelData = readExcelFile(filePath);
+    const { workbook, sheet, excelData } = readExcelFile(filePath);
 
     // Fetch the Group ID
     console.log(`Fetching group ID for group: ${groupName}`);
@@ -688,19 +739,15 @@ async function syncMondayToExcel(boardId, apiKey, filePath) {
         items: mondayItems,
     };
 
-    // Compare data and update Excel file
+    // Compare data and get the updated values
     console.log('Comparing data and updating Excel file...');
     const updatedExcelData = compareAndUpdateExcelData(excelData, mondayData);
 
-    // Write updated data back to the Excel file
-    writeDataToExcelFile(updatedExcelData, filePath);
+    // Write updated values back to the Excel file without altering formatting
+    writeDataToExcelFile(updatedExcelData, workbook, sheet, filePath);
 
     console.log(`Excel file updated successfully at ${filePath}`);
 }
-
-
-
-
 
 
 
