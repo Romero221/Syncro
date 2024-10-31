@@ -197,42 +197,6 @@ async function createGroup(boardId, groupTitle, apiKey) {
     }
 }
 
-// Function to delete a group from the board
-async function deleteGroup(boardId, groupId, apiKey) {
-    const mutation = `
-    mutation($boardId: ID!, $groupId: String!) {
-      delete_group(board_id: $boardId, group_id: $groupId) {
-        id
-      }
-    }
-  `;
-
-    const variables = {
-        boardId: parseInt(boardId),
-        groupId: groupId,
-    };
-
-    try {
-        const response = await axios.post(
-            'https://api.monday.com/v2',
-            { query: mutation, variables },
-            {
-                headers: { Authorization: apiKey },
-            }
-        );
-
-        if (response.data.errors) {
-            console.error('GraphQL errors:', response.data.errors);
-            return null;
-        }
-
-        console.log(`Deleted group with ID: ${groupId}`);
-        return response.data.data.delete_group.id;
-    } catch (error) {
-        console.error('Error deleting group:', error);
-        return null;
-    }
-}
 
 // Function to fetch existing columns on the board
 async function fetchColumns(boardId, apiKey) {
@@ -639,67 +603,244 @@ async function fetchItemsByGroup(boardId, groupId, apiKey) {
 
 
 // Implement the compareAndUpdateExcelData function
-function compareAndUpdateExcelData(excelData, mondayData) {
-    const updatedExcelData = [...excelData]; // Clone Excel data to avoid direct modifications
-
-    // Create a map of Monday.com items by item name (assuming 'name' is unique within the group)
-    const mondayItemsMap = {};
-    if (mondayData && mondayData.items) {
-        mondayData.items.forEach((item) => {
-            mondayItemsMap[item.name.trim()] = item;
-        });
-    } else {
-        console.error("Monday.com data is empty or undefined.");
-        return updatedExcelData; // Return unmodified data if Monday data is empty
-    }
-
-    // Loop through each row in the Excel data and compare
-    updatedExcelData.forEach((excelRow, rowIndex) => {
-        const itemName = String(excelRow.Year).trim(); // Assuming 'Year' is a unique identifier
-        const mondayItem = mondayItemsMap[itemName];
-
-        if (mondayItem) {
-            // Compare each column's value within the row, excluding "Comment" column
-            mondayItem.column_values.forEach((colVal) => {
-                const columnTitle = colVal.column ? colVal.column.title.trim() : "";
-                const mondayValue = colVal.text ? colVal.text.trim() : "";
-
-                // Exclude "Comment" column from the update
-                if (columnTitle && columnTitle.toLowerCase() !== "comment") {
-                    const excelValue = excelRow[columnTitle] !== null && excelRow[columnTitle] !== undefined
-                        ? String(excelRow[columnTitle]).trim()
-                        : "";
-
-                    // Update only if values are different
-                    if (mondayValue !== excelValue) {
-                        console.log(
-                            `Updating cell [Row ${rowIndex + 2}][Column: ${columnTitle}]: "${excelValue}" -> "${mondayValue}"`
-                        );
-                        excelRow[columnTitle] = mondayValue; // Only update value in cloned data
-                    }
-                }
-            });
-        } else {
-            console.warn(`Item "${itemName}" not found in Monday.com data.`);
+function compareAndUpdateExcelData(headers, existingData, newData) {
+    // Create a map of existing Excel items by 'Year'
+    const excelItemsMap = {};
+    existingData.forEach((row) => {
+        const year = String(row['Year']).trim();
+        if (year) {
+            excelItemsMap[year] = row;
         }
     });
 
-    return updatedExcelData; // Return updated data with only changed cells modified
+    // Iterate over newData (from Monday.com) and update existingData accordingly
+    newData.forEach((mondayRow) => {
+        const year = String(mondayRow['Year']).trim();
+        if (excelItemsMap[year]) {
+            // Existing row: compare and update differences
+            headers.forEach((header) => {
+                if (header.toLowerCase() === 'comment') {
+                    // Skip 'Comment' column
+                    return;
+                }
+
+                const excelValue = excelItemsMap[year][header] !== undefined && excelItemsMap[year][header] !== null
+                    ? String(excelItemsMap[year][header]).trim()
+                    : '';
+
+                const mondayValue = mondayRow[header] !== undefined && mondayRow[header] !== null
+                    ? String(mondayRow[header]).trim()
+                    : '';
+
+                if (mondayValue !== excelValue) {
+                    console.log(`Updating cell [Year: ${year}][Column: ${header}]: "${excelValue}" -> "${mondayValue}"`);
+                    excelItemsMap[year][header] = mondayValue;
+                }
+            });
+        } else {
+            // New row: append to existingData
+            console.log(`Adding new row for Year: ${year}`);
+            const newRow = {};
+            headers.forEach((header) => {
+                if (header.toLowerCase() === 'comment') {
+                    // Skip 'Comment' column
+                    return;
+                }
+                newRow[header] = mondayRow[header] !== undefined && mondayRow[header] !== null
+                    ? mondayRow[header]
+                    : '';
+            });
+            existingData.push(newRow);
+        }
+    });
+
+    return existingData;
 }
 
 
 
-
 // Modify writeDataToExcelFile function if necessary
-function writeDataToExcelFile(dataRows, filePath) {
-    // Convert data to worksheet
-    const worksheet = xlsx.utils.json_to_sheet(dataRows);
+function writeDataToExcelFile(workbook, sheetName, sheet, headers, dataRows, filePath) {
+    // Determine the starting row (assuming headers are in the first row)
+    const startRow = 2;
 
-    // Create a new workbook and append the worksheet
-    const workbook = xlsx.utils.book_new();
-    xlsx.utils.book_append_sheet(workbook, worksheet, 'Sheet1');
+    // Map headers to column indices
+    const headerMap = {};
+    headers.forEach((header, index) => {
+        headerMap[header] = index;
+    });
 
-    // Write to file
+    // Find the maximum row count to preserve existing rows
+    const existingRowCount = xlsx.utils.decode_range(sheet['!ref']).e.r;
+
+    // Update existing rows
+    dataRows.forEach((rowData, rowIndex) => {
+        const excelRowIndex = startRow + rowIndex;
+        headers.forEach((header, colIndex) => {
+            // Exclude 'Comment' column
+            if (header.toLowerCase() === 'comment') {
+                return;
+            }
+
+            // Get the cell address
+            const cellAddress = xlsx.utils.encode_cell({ r: excelRowIndex - 1, c: colIndex });
+            let cell = sheet[cellAddress];
+
+            if (cell) {
+                const newValue = rowData[header] !== undefined && rowData[header] !== null
+                    ? String(rowData[header]).trim()
+                    : '';
+
+                // Only update if the value is different
+                if (cell.v !== newValue) {
+                    console.log(`Updating cell [Row ${excelRowIndex}][Column: ${header}]: "${cell.v}" -> "${newValue}"`);
+                    cell.v = newValue;
+                    // If you want to ensure the cell type is string
+                    cell.t = 's';
+                }
+            } else {
+                // If the cell doesn't exist, create it
+                const newValue = rowData[header] !== undefined && rowData[header] !== null
+                    ? String(rowData[header]).trim()
+                    : '';
+                console.log(`Creating cell [Row ${excelRowIndex}][Column: ${header}]: "${newValue}"`);
+                sheet[cellAddress] = { t: 's', v: newValue };
+            }
+        });
+    });
+
+    // Adjust the sheet's range if new rows have been added
+    const newRowCount = dataRows.length + startRow - 1;
+    if (newRowCount > existingRowCount) {
+        const newRef = xlsx.utils.encode_range({
+            s: { r: 0, c: 0 },
+            e: { r: newRowCount - 1, c: headers.length - 1 },
+        });
+        sheet['!ref'] = newRef;
+    }
+
+    // Write the updated workbook back to the file
+    xlsx.writeFile(workbook, filePath);
+}
+
+
+
+function readExcelFileWithFormatting(filePath) {
+    const workbook = xlsx.readFile(filePath, { cellStyles: true });
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+
+    // Get the headers (column titles)
+    const headers = [];
+    const range = xlsx.utils.decode_range(sheet['!ref']);
+    const firstRow = range.s.r; // Start row
+
+    for (let C = range.s.c; C <= range.e.c; ++C) {
+        const cellAddress = xlsx.utils.encode_cell({ r: firstRow, c: C });
+        const cell = sheet[cellAddress];
+        if (cell && cell.v) {
+            headers.push(cell.v);
+        } else {
+            headers.push(`UNKNOWN_${C}`);
+        }
+    }
+
+    // Convert the sheet to JSON format, preserving empty cells
+    const jsonData = xlsx.utils.sheet_to_json(sheet, { defval: null, raw: false });
+
+    if (!Array.isArray(jsonData)) {
+        console.error("Error: Excel data is not in an iterable array format.");
+        return { workbook, sheetName, sheet, headers, data: [] };
+    }
+
+    return { workbook, sheetName, sheet, headers, data: jsonData };
+}
+
+
+function mapMondayDataToExcel(headers, mondayItems) {
+    const dataRows = [];
+
+    mondayItems.forEach((item) => {
+        const rowData = {};
+        rowData['Year'] = item.name.trim(); // Assuming 'Year' is the item name
+
+        item.column_values.forEach((colVal) => {
+            const columnTitle = colVal.column ? colVal.column.title.trim() : '';
+            const mondayValue = colVal.text ? colVal.text.trim() : '';
+
+            // Exclude "Comment" column
+            if (columnTitle && columnTitle.toLowerCase() !== 'comment') {
+                if (headers.includes(columnTitle)) {
+                    rowData[columnTitle] = mondayValue !== 'No Text' ? mondayValue : '';
+                } else {
+                    // Column title from Monday.com not found in Excel headers
+                    console.warn(`Column "${columnTitle}" not found in Excel headers.`);
+                }
+            }
+        });
+
+        dataRows.push(rowData);
+    });
+
+    return dataRows;
+}
+
+
+function updateExcelSheetWithData(
+    workbook,
+    sheetName,
+    sheet,
+    headers,
+    dataRows,
+    filePath
+) {
+    // Get the range of the sheet
+    const range = xlsx.utils.decode_range(sheet['!ref']);
+    const startRow = 1; // Assuming headers are in the first row (index 0)
+
+    // Clear existing data rows starting from row 2
+    for (let R = startRow + 1; R <= range.e.r; ++R) {
+        for (let C = range.s.c; C <= range.e.c; ++C) {
+            const cellAddress = xlsx.utils.encode_cell({ r: R, c: C });
+            const cell = sheet[cellAddress];
+            if (cell) {
+                // Clear cell value but keep formatting
+                cell.v = '';
+            }
+        }
+    }
+
+    // Write new data rows
+    let currentRow = startRow + 1; // Start from the row after headers
+
+    dataRows.forEach((rowData) => {
+        headers.forEach((header, colIndex) => {
+            const cellAddress = xlsx.utils.encode_cell({ r: currentRow, c: colIndex });
+            let cell = sheet[cellAddress];
+
+            if (!cell) {
+                // If the cell doesn't exist, create it
+                cell = { t: 's', v: '', s: {} };
+            }
+
+            // Update cell value
+            const cellValue = rowData[header];
+            cell.v = cellValue;
+
+            // Save cell back to sheet
+            sheet[cellAddress] = cell;
+        });
+
+        currentRow += 1;
+    });
+
+    // Update the sheet's used range
+    sheet['!ref'] = xlsx.utils.encode_range({
+        s: { r: 0, c: 0 },
+        e: { r: currentRow - 1, c: headers.length - 1 },
+    });
+
+    // Write the workbook back to file
     xlsx.writeFile(workbook, filePath);
 }
 
@@ -709,9 +850,13 @@ async function syncMondayToExcel(boardId, apiKey, filePath) {
     const groupName = extractManufacturer(filePath); // Extract the group name from the Excel file name
     console.log(`Group Name extracted from file: ${groupName}`);
 
-    // Read the existing Excel file
+    // Read the existing Excel file with formatting
     console.log('Reading existing Excel file...');
-    const excelData = readExcelFile(filePath);
+    const { workbook, sheetName, sheet, headers, data } = readExcelFileWithFormatting(filePath);
+
+    if (!Array.isArray(data) || data.length === 0) {
+        console.warn("Excel file is empty or not properly formatted. Proceeding with synchronization.");
+    }
 
     // Fetch the Group ID
     console.log(`Fetching group ID for group: ${groupName}`);
@@ -733,21 +878,20 @@ async function syncMondayToExcel(boardId, apiKey, filePath) {
 
     console.log('Data fetched from Monday.com successfully.');
 
-    // Prepare Monday.com data for comparison
-    const mondayData = {
-        items: mondayItems,
-    };
+    // Map Monday.com data to Excel columns
+    console.log('Mapping Monday.com data to Excel format...');
+    const mappedMondayData = mapMondayDataToExcel(headers, mondayItems);
 
-    // Compare data and update Excel file
-    console.log('Comparing data and updating Excel file...');
-    const updatedExcelData = compareAndUpdateExcelData(excelData, mondayData);
+    // Compare and update Excel data
+    console.log('Comparing data and preparing updates...');
+    const updatedData = compareAndUpdateExcelData(headers, data, mappedMondayData);
 
     // Write updated data back to the Excel file
-    writeDataToExcelFile(updatedExcelData, filePath);
+    console.log('Writing updated data back to Excel file...');
+    writeDataToExcelFile(workbook, sheetName, sheet, headers, updatedData, filePath);
 
     console.log(`Excel file updated successfully at ${filePath}`);
 }
-
 
 
 
@@ -848,8 +992,7 @@ async function updateOrCreateBoard(filePath, apiKey, boardId) {
 
     // Delete columns that exist on the board but are not in the Excel sheet, excluding 'Name' and 'Comment' columns
     for (let existingColumn of existingColumns) {
-        if (
-            existingColumn.title.trim().toLowerCase() !== 'name' && // Do not delete the 'Name' column
+        if (            
             existingColumn.title.trim().toLowerCase() !== 'comment' && // Do not delete the 'Comment' column
             !excelColumns.some(
                 (excelCol) =>
