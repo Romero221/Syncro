@@ -368,6 +368,8 @@ async function updateItem(boardId, itemId, columnValues, apiKey) {
         columnValues: JSON.stringify(columnValues),
     };
 
+    console.log(`Updating item ID: ${itemId} with values:`, columnValues);
+
     try {
         const response = await axios.post(
             'https://api.monday.com/v2',
@@ -378,25 +380,17 @@ async function updateItem(boardId, itemId, columnValues, apiKey) {
         );
 
         if (response.data.errors) {
-            console.error('GraphQL errors:', response.data.errors);
+            console.error('GraphQL errors during update:', response.data.errors);
             return null;
         }
 
-        if (
-            response.data &&
-            response.data.data &&
-            response.data.data.change_multiple_column_values
-        ) {
-            return response.data.data.change_multiple_column_values.id;
-        } else {
-            console.error('Unexpected response structure:', response.data);
-            return null;
-        }
+        return response.data.data.change_multiple_column_values.id;
     } catch (error) {
-        console.error('Error updating item:', error);
-        throw new Error('Failed to update item');
+        console.error('Error updating item in Monday:', error.message);
+        throw new Error('Failed to update item in Monday');
     }
 }
+
 
 // Function to archive a group on the board
 async function archiveGroup(boardId, groupId, apiKey) {
@@ -604,7 +598,6 @@ async function fetchItemsByGroup(boardId, groupId, apiKey) {
 
 // Implement the compareAndUpdateExcelData function
 function compareAndUpdateExcelData(headers, existingData, newData) {
-    // Create a map of existing Excel items by 'Year'
     const excelItemsMap = {};
     existingData.forEach((row) => {
         const year = String(row['Year']).trim();
@@ -613,15 +606,12 @@ function compareAndUpdateExcelData(headers, existingData, newData) {
         }
     });
 
-    // Iterate over newData (from Monday.com) and update existingData accordingly
     newData.forEach((mondayRow) => {
         const year = String(mondayRow['Year']).trim();
         if (excelItemsMap[year]) {
-            // Existing row: compare and update differences
             headers.forEach((header) => {
                 if (header.toLowerCase() === 'comment') {
-                    // Skip 'Comment' column
-                    return;
+                    return; // Skip 'Comment' column
                 }
 
                 const excelValue = excelItemsMap[year][header] !== undefined && excelItemsMap[year][header] !== null
@@ -638,24 +628,13 @@ function compareAndUpdateExcelData(headers, existingData, newData) {
                 }
             });
         } else {
-            // New row: append to existingData
-            console.log(`Adding new row for Year: ${year}`);
-            const newRow = {};
-            headers.forEach((header) => {
-                if (header.toLowerCase() === 'comment') {
-                    // Skip 'Comment' column
-                    return;
-                }
-                newRow[header] = mondayRow[header] !== undefined && mondayRow[header] !== null
-                    ? mondayRow[header]
-                    : '';
-            });
-            existingData.push(newRow);
+            console.warn(`Item "${year}" not found in Monday.com data.`);
         }
     });
 
-    return existingData;
+    return existingData; // Return updated data with only changed cells modified
 }
+
 
 
 
@@ -723,38 +702,40 @@ function writeDataToExcelFile(workbook, sheetName, sheet, headers, dataRows, fil
     xlsx.writeFile(workbook, filePath);
 }
 
-
+//#########################################################
 
 function readExcelFileWithFormatting(filePath) {
     const workbook = xlsx.readFile(filePath, { cellStyles: true });
     const sheetName = workbook.SheetNames[0];
     const sheet = workbook.Sheets[sheetName];
 
-    // Get the headers (column titles)
-    const headers = [];
-    const range = xlsx.utils.decode_range(sheet['!ref']);
-    const firstRow = range.s.r; // Start row
+    // Get the headers (column titles) from the first row
+    const headersRow = xlsx.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
+    const headers = headersRow[0].map(header => header ? header.toString().trim() : '');
 
-    for (let C = range.s.c; C <= range.e.c; ++C) {
-        const cellAddress = xlsx.utils.encode_cell({ r: firstRow, c: C });
-        const cell = sheet[cellAddress];
-        if (cell && cell.v) {
-            headers.push(cell.v);
+    // Handle duplicate column names
+    const headerCount = {};
+    const uniqueHeaders = headers.map((header) => {
+        if (headerCount[header]) {
+            headerCount[header] += 1;
+            return `${header} (${headerCount[header]})`;
         } else {
-            headers.push(`UNKNOWN_${C}`);
+            headerCount[header] = 1;
+            return header;
         }
-    }
+    });
 
-    // Convert the sheet to JSON format, preserving empty cells
-    const jsonData = xlsx.utils.sheet_to_json(sheet, { defval: null, raw: false });
+    // Convert the sheet to JSON format, preserving empty cells and using unique headers
+    const jsonData = xlsx.utils.sheet_to_json(sheet, { header: uniqueHeaders, defval: null, range: 1 });
 
-    if (!Array.isArray(jsonData)) {
-        console.error("Error: Excel data is not in an iterable array format.");
-        return { workbook, sheetName, sheet, headers, data: [] };
-    }
+    // Log the unique headers and sample data rows
+    console.log('Unique Excel Headers:', uniqueHeaders);
+    console.log('Sample data rows:', jsonData.slice(0, 3));
 
-    return { workbook, sheetName, sheet, headers, data: jsonData };
+    return { workbook, sheetName, sheet, headers: uniqueHeaders, data: jsonData };
 }
+
+
 
 
 function mapMondayDataToExcel(headers, mondayItems) {
@@ -768,12 +749,11 @@ function mapMondayDataToExcel(headers, mondayItems) {
             const columnTitle = colVal.column ? colVal.column.title.trim() : '';
             const mondayValue = colVal.text ? colVal.text.trim() : '';
 
-            // Exclude "Comment" column
+            // Exclude "Comment" column and ensure "Protech Generic System Name" data is captured
             if (columnTitle && columnTitle.toLowerCase() !== 'comment') {
                 if (headers.includes(columnTitle)) {
                     rowData[columnTitle] = mondayValue !== 'No Text' ? mondayValue : '';
                 } else {
-                    // Column title from Monday.com not found in Excel headers
                     console.warn(`Column "${columnTitle}" not found in Excel headers.`);
                 }
             }
@@ -784,6 +764,7 @@ function mapMondayDataToExcel(headers, mondayItems) {
 
     return dataRows;
 }
+
 
 
 function updateExcelSheetWithData(
@@ -899,8 +880,9 @@ async function syncMondayToExcel(boardId, apiKey, filePath) {
 
 
 async function updateOrCreateBoard(filePath, apiKey, boardId) {
-    const excelData = readExcelFile(filePath);
-    const groupName = extractManufacturer(filePath); // Use the first word of the file name as the group title
+    // Read the existing Excel file with formatting
+    const { workbook, sheetName, sheet, headers, data } = readExcelFileWithFormatting(filePath);
+    const groupName = extractManufacturer(filePath);
 
     // Fetch existing groups on the board
     const groups = await fetchGroups(boardId, apiKey);
@@ -933,17 +915,19 @@ async function updateOrCreateBoard(filePath, apiKey, boardId) {
         col.title.trim().toLowerCase()
     );
 
+    // Use headers directly
+    const excelColumns = headers.map((col) => col.trim());
+
     console.log('Existing columns:', existingColumnTitles);
 
     // No need to create the "Year" column as it's the default item name column
-    const columnIdMap = {}; // To store the mapping between column titles and their IDs in Monday.com
+    const columnIdMap = {};
     console.log('Skipping "Year" column creation as it is the item name column.');
 
-    // Create or match the remaining columns from the Excel sheet (starting from the 2nd column onward)
-    const excelColumns = Object.keys(excelData[0]).map((col) => col.trim()); // Get column headers from Excel file and trim them
+    const startIndex = excelColumns[0].toLowerCase() === 'year' ? 1 : 0;
 
-    for (let i = 1; i < excelColumns.length; i++) {
-        // Skip the first "Year" column, as it was handled separately
+    // Create or map the remaining columns from the Excel sheet
+    for (let i = startIndex; i < excelColumns.length; i++) {
         const excelColumn = excelColumns[i];
         if (!existingColumnTitles.includes(excelColumn.toLowerCase())) {
             // Create column if it doesn't exist
@@ -962,6 +946,7 @@ async function updateOrCreateBoard(filePath, apiKey, boardId) {
             );
         }
     }
+
 
     // Ensure 'Comment' column exists at the very end and is not deleted
     const commentColumnTitle = 'Comment';
@@ -990,9 +975,9 @@ async function updateOrCreateBoard(filePath, apiKey, boardId) {
         col.title.trim().toLowerCase()
     );
 
-    // Delete columns that exist on the board but are not in the Excel sheet, excluding 'Name' and 'Comment' columns
+    // Delete columns that exist on the board but are not in the Excel sheet, excluding 'Comment' column
     for (let existingColumn of existingColumns) {
-        if (            
+        if (
             existingColumn.title.trim().toLowerCase() !== 'comment' && // Do not delete the 'Comment' column
             !excelColumns.some(
                 (excelCol) =>
@@ -1005,14 +990,22 @@ async function updateOrCreateBoard(filePath, apiKey, boardId) {
     }
 
     // Iterate over Excel data and create items using the year value as the item name
-    for (const row of excelData) {
+    for (const row of data) {
         const year = String(row.Year).trim(); // Ensure 'Year' is used as the item name (default column)
         const columnValues = {};
 
         // Map Excel data to Monday.com columns using the correct column IDs, skipping the 'Year' column
-        for (let i = 1; i < excelColumns.length; i++) {
-            const column = excelColumns[i].trim();
-            columnValues[columnIdMap[column]] = String(row[column]).trim();
+        for (let i = startIndex; i < excelColumns.length; i++) {
+            const column = excelColumns[i];
+            const cellValue = row[column];
+
+            // Check if the cell is not blank
+            if (cellValue !== undefined && cellValue !== null && String(cellValue).trim() !== '') {
+                columnValues[columnIdMap[column]] = String(cellValue).trim();
+            } else {
+                // Skip blanks
+                console.log(`Skipping blank cell for column "${column}" in year "${year}"`);
+            }
         }
 
         // Create new item
@@ -1029,8 +1022,12 @@ async function updateOrCreateBoard(filePath, apiKey, boardId) {
         await new Promise((resolve) => setTimeout(resolve, 1000));
 
         // Update the item with the rest of the column values
-        console.log(`Updating item ID ${newItemId} with column values.`);
-        await updateItem(boardId, newItemId, columnValues, apiKey);
-        console.log(`Updated item ID ${newItemId} with column values.`);
+        if (Object.keys(columnValues).length > 0) {
+            console.log(`Updating item ID ${newItemId} with column values.`);
+            await updateItem(boardId, newItemId, columnValues, apiKey);
+            console.log(`Updated item ID ${newItemId} with column values.`);
+        } else {
+            console.log(`No column values to update for item ID ${newItemId}. Skipping update.`);
+        }
     }
 }
