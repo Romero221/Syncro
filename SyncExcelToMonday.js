@@ -764,7 +764,7 @@ function mapMondayDataToExcel(headers, mondayItems) {
     return dataRows;
 }
 
-
+//##################################################################################################
 
 
 function updateExcelSheetWithData(
@@ -781,20 +781,32 @@ function updateExcelSheetWithData(
     const columnWidths = sheet['!cols'] ? [...sheet['!cols']] : [];
     const rowHeights = sheet['!rows'] ? [...sheet['!rows']] : [];
 
-    // Clear existing data rows starting from row 2 (below headers) but retain formatting
+    // Capture original cell styles
+    const originalStyles = {};
     const range = xlsx.utils.decode_range(sheet['!ref']);
+    for (let R = startRow; R <= range.e.r; ++R) {
+        for (let C = range.s.c; C <= range.e.c; ++C) {
+            const cellAddress = xlsx.utils.encode_cell({ r: R, c: C });
+            const cell = sheet[cellAddress];
+            if (cell && cell.s) {
+                // Store the style of each cell to apply it later
+                originalStyles[cellAddress] = { ...cell.s };
+            }
+        }
+    }
+
+    // Clear existing data rows starting from row 2 (below headers) but retain formatting
     for (let R = startRow + 1; R <= range.e.r; ++R) {
         for (let C = range.s.c; C <= range.e.c; ++C) {
             const cellAddress = xlsx.utils.encode_cell({ r: R, c: C });
             const cell = sheet[cellAddress];
             if (cell) {
-                // Clear cell value while retaining other cell properties (e.g., color, size)
-                cell.v = '';
+                cell.v = ''; // Clear value only
             }
         }
     }
 
-    // Write new data rows while preserving original formatting
+    // Write new data rows with formatting
     let currentRow = startRow + 0; // Start from the row after headers
 
     dataRows.forEach((rowData) => {
@@ -807,16 +819,17 @@ function updateExcelSheetWithData(
                 cell = { t: 's', v: '', s: {} };
             }
 
-            // Preserve existing style
+            // Set new cell value
             const cellValue = rowData[header] !== undefined ? rowData[header] : '';
             cell.v = cellValue;
 
-            // Retain any original style settings if the cell was already in the sheet
-            if (sheet[cellAddress] && sheet[cellAddress].s) {
-                cell.s = { ...sheet[cellAddress].s };
+            // Apply original formatting if available
+            if (originalStyles[cellAddress]) {
+                cell.s = { ...originalStyles[cellAddress] };
             }
 
-            sheet[cellAddress] = cell; // Update cell in the sheet
+            // Save the cell back to the sheet
+            sheet[cellAddress] = cell;
         });
 
         currentRow += 1;
@@ -830,15 +843,16 @@ function updateExcelSheetWithData(
         sheet['!rows'] = rowHeights;
     }
 
-    // Update the sheet's used range
+    // Adjust the sheet's range
     sheet['!ref'] = xlsx.utils.encode_range({
         s: { r: 0, c: 0 },
         e: { r: currentRow - 1, c: headers.length - 1 },
     });
 
-    // Write the workbook back to file with all formatting preserved
+    // Write the updated workbook to the file, preserving all formatting
     xlsx.writeFile(workbook, filePath);
 }
+
 
 
 
