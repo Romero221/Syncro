@@ -775,22 +775,26 @@ function updateExcelSheetWithData(
     dataRows,
     filePath
 ) {
-    const startRow = 1; // Assuming headers are in the first row
+    const startRow = 1; // Assuming headers are in the first row (index 0)
 
-    // Clear existing data rows starting from row 2 (below headers)
+    // Preserve column widths and row heights
+    const columnWidths = sheet['!cols'] ? [...sheet['!cols']] : [];
+    const rowHeights = sheet['!rows'] ? [...sheet['!rows']] : [];
+
+    // Clear existing data rows starting from row 2 (below headers) but retain formatting
     const range = xlsx.utils.decode_range(sheet['!ref']);
     for (let R = startRow + 1; R <= range.e.r; ++R) {
         for (let C = range.s.c; C <= range.e.c; ++C) {
             const cellAddress = xlsx.utils.encode_cell({ r: R, c: C });
             const cell = sheet[cellAddress];
             if (cell) {
-                // Clear the cell's value but keep formatting
+                // Clear cell value while retaining other cell properties (e.g., color, size)
                 cell.v = '';
             }
         }
     }
 
-    // Start writing data from Monday.com starting from the row below headers
+    // Write new data rows while preserving original formatting
     let currentRow = startRow + 0; // Start from the row after headers
 
     dataRows.forEach((rowData) => {
@@ -799,29 +803,43 @@ function updateExcelSheetWithData(
             let cell = sheet[cellAddress];
 
             if (!cell) {
-                cell = { t: 's', v: '', s: {} }; // Create cell if it doesn’t exist
+                // If the cell doesn't exist, create it with default style
+                cell = { t: 's', v: '', s: {} };
             }
 
-            // Update cell with new data from Monday.com while keeping existing style
+            // Preserve existing style
             const cellValue = rowData[header] !== undefined ? rowData[header] : '';
             cell.v = cellValue;
 
-            sheet[cellAddress] = cell; // Ensure cell is saved in the sheet
+            // Retain any original style settings if the cell was already in the sheet
+            if (sheet[cellAddress] && sheet[cellAddress].s) {
+                cell.s = { ...sheet[cellAddress].s };
+            }
+
+            sheet[cellAddress] = cell; // Update cell in the sheet
         });
 
         currentRow += 1;
     });
 
-    // Update the sheet's range to reflect any new rows
-    const newRange = xlsx.utils.encode_range({
+    // Restore column widths and row heights
+    if (columnWidths.length > 0) {
+        sheet['!cols'] = columnWidths;
+    }
+    if (rowHeights.length > 0) {
+        sheet['!rows'] = rowHeights;
+    }
+
+    // Update the sheet's used range
+    sheet['!ref'] = xlsx.utils.encode_range({
         s: { r: 0, c: 0 },
         e: { r: currentRow - 1, c: headers.length - 1 },
     });
-    sheet['!ref'] = newRange;
 
-    // Write the workbook back to the file, preserving formatting
+    // Write the workbook back to file with all formatting preserved
     xlsx.writeFile(workbook, filePath);
 }
+
 
 
 
