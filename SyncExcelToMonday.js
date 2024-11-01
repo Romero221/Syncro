@@ -775,11 +775,12 @@ function updateExcelSheetWithData(
     dataRows,
     filePath
 ) {
-    const startRow = 2; // Assuming headers are in the first row
+    const startRow = 1; // Assuming headers are in the first row
 
-    // Clear existing data rows starting from row 2 to avoid overwriting headers
-    for (let R = startRow + 1; R <= xlsx.utils.decode_range(sheet['!ref']).e.r; ++R) {
-        for (let C = 0; C < headers.length; ++C) {
+    // Clear existing data rows starting from row 2 (below headers)
+    const range = xlsx.utils.decode_range(sheet['!ref']);
+    for (let R = startRow + 1; R <= range.e.r; ++R) {
+        for (let C = range.s.c; C <= range.e.c; ++C) {
             const cellAddress = xlsx.utils.encode_cell({ r: R, c: C });
             const cell = sheet[cellAddress];
             if (cell) {
@@ -789,8 +790,8 @@ function updateExcelSheetWithData(
         }
     }
 
-    // Write new data rows without affecting formatting
-    let currentRow = startRow + 1;
+    // Start writing data from Monday.com starting from the row below headers
+    let currentRow = startRow + 0; // Start from the row after headers
 
     dataRows.forEach((rowData) => {
         headers.forEach((header, colIndex) => {
@@ -801,7 +802,7 @@ function updateExcelSheetWithData(
                 cell = { t: 's', v: '', s: {} }; // Create cell if it doesn’t exist
             }
 
-            // Update cell with new data while keeping existing style
+            // Update cell with new data from Monday.com while keeping existing style
             const cellValue = rowData[header] !== undefined ? rowData[header] : '';
             cell.v = cellValue;
 
@@ -821,6 +822,7 @@ function updateExcelSheetWithData(
     // Write the workbook back to the file, preserving formatting
     xlsx.writeFile(workbook, filePath);
 }
+
 
 
 
