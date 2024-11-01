@@ -486,8 +486,6 @@ async function getGroupId(boardId, apiKey, groupName) {
     }
 }
 
-//################################################################################################################################################
-
 async function fetchItemsByGroup(boardId, groupId, apiKey) {
     let items = [];
     let cursor = null;
@@ -595,6 +593,7 @@ async function fetchItemsByGroup(boardId, groupId, apiKey) {
     }
 }
 
+//#########################################################################################################################################################
 
 // Implement the compareAndUpdateExcelData function
 function compareAndUpdateExcelData(headers, existingData, newData) {
@@ -749,10 +748,10 @@ function mapMondayDataToExcel(headers, mondayItems) {
             const columnTitle = colVal.column ? colVal.column.title.trim() : '';
             const mondayValue = colVal.text ? colVal.text.trim() : '';
 
-            // Exclude "Comment" column and ensure "Protech Generic System Name" data is captured
+            // Exclude "Comment" column and ensure other columns are mapped
             if (columnTitle && columnTitle.toLowerCase() !== 'comment') {
                 if (headers.includes(columnTitle)) {
-                    rowData[columnTitle] = mondayValue !== 'No Text' ? mondayValue : '';
+                    rowData[columnTitle] = mondayValue || ''; // Populate only if data exists
                 } else {
                     console.warn(`Column "${columnTitle}" not found in Excel headers.`);
                 }
@@ -767,6 +766,7 @@ function mapMondayDataToExcel(headers, mondayItems) {
 
 
 
+
 function updateExcelSheetWithData(
     workbook,
     sheetName,
@@ -775,24 +775,22 @@ function updateExcelSheetWithData(
     dataRows,
     filePath
 ) {
-    // Get the range of the sheet
-    const range = xlsx.utils.decode_range(sheet['!ref']);
-    const startRow = 1; // Assuming headers are in the first row (index 0)
+    const startRow = 2; // Assuming headers are in the first row
 
-    // Clear existing data rows starting from row 2
-    for (let R = startRow + 1; R <= range.e.r; ++R) {
-        for (let C = range.s.c; C <= range.e.c; ++C) {
+    // Clear existing data rows starting from row 2 to avoid overwriting headers
+    for (let R = startRow + 1; R <= xlsx.utils.decode_range(sheet['!ref']).e.r; ++R) {
+        for (let C = 0; C < headers.length; ++C) {
             const cellAddress = xlsx.utils.encode_cell({ r: R, c: C });
             const cell = sheet[cellAddress];
             if (cell) {
-                // Clear cell value but keep formatting
+                // Clear the cell's value but keep formatting
                 cell.v = '';
             }
         }
     }
 
-    // Write new data rows
-    let currentRow = startRow + 1; // Start from the row after headers
+    // Write new data rows without affecting formatting
+    let currentRow = startRow + 1;
 
     dataRows.forEach((rowData) => {
         headers.forEach((header, colIndex) => {
@@ -800,30 +798,31 @@ function updateExcelSheetWithData(
             let cell = sheet[cellAddress];
 
             if (!cell) {
-                // If the cell doesn't exist, create it
-                cell = { t: 's', v: '', s: {} };
+                cell = { t: 's', v: '', s: {} }; // Create cell if it doesn’t exist
             }
 
-            // Update cell value
-            const cellValue = rowData[header];
+            // Update cell with new data while keeping existing style
+            const cellValue = rowData[header] !== undefined ? rowData[header] : '';
             cell.v = cellValue;
 
-            // Save cell back to sheet
-            sheet[cellAddress] = cell;
+            sheet[cellAddress] = cell; // Ensure cell is saved in the sheet
         });
 
         currentRow += 1;
     });
 
-    // Update the sheet's used range
-    sheet['!ref'] = xlsx.utils.encode_range({
+    // Update the sheet's range to reflect any new rows
+    const newRange = xlsx.utils.encode_range({
         s: { r: 0, c: 0 },
         e: { r: currentRow - 1, c: headers.length - 1 },
     });
+    sheet['!ref'] = newRange;
 
-    // Write the workbook back to file
+    // Write the workbook back to the file, preserving formatting
     xlsx.writeFile(workbook, filePath);
 }
+
+
 
 
 // Implement the syncMondayToExcel function
@@ -859,20 +858,18 @@ async function syncMondayToExcel(boardId, apiKey, filePath) {
 
     console.log('Data fetched from Monday.com successfully.');
 
-    // Map Monday.com data to Excel columns
+    // Map Monday.com data to Excel format
     console.log('Mapping Monday.com data to Excel format...');
     const mappedMondayData = mapMondayDataToExcel(headers, mondayItems);
 
-    // Compare and update Excel data
-    console.log('Comparing data and preparing updates...');
-    const updatedData = compareAndUpdateExcelData(headers, data, mappedMondayData);
-
-    // Write updated data back to the Excel file
-    console.log('Writing updated data back to Excel file...');
-    writeDataToExcelFile(workbook, sheetName, sheet, headers, updatedData, filePath);
+    // Update Excel sheet with the mapped data, preserving formatting
+    console.log('Writing mapped data to Excel file while preserving formatting...');
+    updateExcelSheetWithData(workbook, sheetName, sheet, headers, mappedMondayData, filePath);
 
     console.log(`Excel file updated successfully at ${filePath}`);
 }
+
+
 
 
 
