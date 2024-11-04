@@ -3,6 +3,7 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const xlsx = require('xlsx');
+const ExcelJS = require('exceljs');
 const axios = require('axios');
 const fs = require('fs');
 
@@ -734,9 +735,33 @@ function readExcelFileWithFormatting(filePath) {
     return { workbook, sheetName, sheet, headers: uniqueHeaders, data: jsonData };
 }
 
+// Function to update the Excel sheet with Monday data, preserving all formatting
+async function updateExcelSheetWithAllFormatting(workbook, sheetName, headers, dataRows) {
+    const sheet = workbook.getWorksheet(sheetName);
+
+    // Start from the second row, assuming headers are in the first row
+    const startRow = 2;
+
+    // Clear existing data rows while keeping formatting
+    dataRows.forEach((rowData, rowIndex) => {
+        const row = sheet.getRow(startRow + rowIndex);
+
+        headers.forEach((header, colIndex) => {
+            const cell = row.getCell(colIndex + 1);
+            const cellValue = rowData[header];
+
+            // Preserve formatting and update value
+            if (cellValue !== undefined) {
+                cell.value = cellValue; // Update only value
+            }
+        });
+    });
+
+    return workbook;
+}
 
 
-
+// Function to map Monday data to an Excel-compatible format
 function mapMondayDataToExcel(headers, mondayItems) {
     const dataRows = [];
 
@@ -748,10 +773,10 @@ function mapMondayDataToExcel(headers, mondayItems) {
             const columnTitle = colVal.column ? colVal.column.title.trim() : '';
             const mondayValue = colVal.text ? colVal.text.trim() : '';
 
-            // Exclude "Comment" column and ensure other columns are mapped
+            // Exclude "Comment" column
             if (columnTitle && columnTitle.toLowerCase() !== 'comment') {
                 if (headers.includes(columnTitle)) {
-                    rowData[columnTitle] = mondayValue || ''; // Populate only if data exists
+                    rowData[columnTitle] = mondayValue !== 'No Text' ? mondayValue : '';
                 } else {
                     console.warn(`Column "${columnTitle}" not found in Excel headers.`);
                 }
@@ -859,52 +884,44 @@ function updateExcelSheetWithData(
 
 
 
-// Implement the syncMondayToExcel function
+// The main function that handles the syncing of Monday.com data to Excel
 async function syncMondayToExcel(boardId, apiKey, filePath) {
-    const groupName = extractManufacturer(filePath); // Extract the group name from the Excel file name
-    console.log(`Group Name extracted from file: ${groupName}`);
+    const workbook = await loadWorkbookWithFormatting(filePath); // Load the original Excel file
+    const sheetName = workbook.getWorksheet(1).name; // Assuming first sheet
+    const headers = workbook.getWorksheet(sheetName).getRow(1).values.slice(1); // Headers from the first row
 
-    // Read the existing Excel file with formatting
-    console.log('Reading existing Excel file...');
-    const { workbook, sheetName, sheet, headers, data } = readExcelFileWithFormatting(filePath);
-
-    if (!Array.isArray(data) || data.length === 0) {
-        console.warn("Excel file is empty or not properly formatted. Proceeding with synchronization.");
-    }
-
-    // Fetch the Group ID
-    console.log(`Fetching group ID for group: ${groupName}`);
-    const groupId = await getGroupId(boardId, apiKey, groupName);
+    // Fetch Monday.com data (implement fetchItemsByGroup based on your setup)
+    const groupName = extractManufacturer(filePath); // Extract group name from the file name
+    const groupId = await getGroupId(boardId, apiKey, groupName); // Get group ID for this group name
 
     if (!groupId) {
         throw new Error('Failed to fetch group ID from Monday.com.');
     }
 
-    console.log(`Group ID for "${groupName}" is ${groupId}`);
-
-    // Fetch items from the group
-    console.log(`Fetching items from group ID: ${groupId}`);
     const mondayItems = await fetchItemsByGroup(boardId, groupId, apiKey);
 
     if (!mondayItems) {
         throw new Error('Failed to fetch items from Monday.com.');
     }
 
-    console.log('Data fetched from Monday.com successfully.');
-
-    // Map Monday.com data to Excel format
-    console.log('Mapping Monday.com data to Excel format...');
     const mappedMondayData = mapMondayDataToExcel(headers, mondayItems);
 
-    // Update Excel sheet with the mapped data, preserving formatting
-    console.log('Writing mapped data to Excel file while preserving formatting...');
-    updateExcelSheetWithData(workbook, sheetName, sheet, headers, mappedMondayData, filePath);
+    // Update the Excel sheet with Monday.com data while keeping all formatting
+    await updateExcelSheetWithAllFormatting(workbook, sheetName, headers, mappedMondayData);
+
+    // Write the updated workbook back to the file
+    await workbook.xlsx.writeFile(filePath);
 
     console.log(`Excel file updated successfully at ${filePath}`);
 }
 
 
-
+// Function to load the Excel file with formatting
+async function loadWorkbookWithFormatting(filePath) {
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(filePath);
+    return workbook;
+}
 
 
 //########################################################################################################################
