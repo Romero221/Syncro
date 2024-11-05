@@ -735,12 +735,24 @@ function readExcelFileWithFormatting(filePath) {
     return { workbook, sheetName, sheet, headers: uniqueHeaders, data: jsonData };
 }
 
-// Function to update the Excel sheet with Monday data, preserving all formatting
+// Function to update the Excel sheet with Monday data while preserving all formatting
 async function updateExcelSheetWithAllFormatting(workbook, sheetName, headers, dataRows) {
     const sheet = workbook.getWorksheet(sheetName);
 
     // Start from the second row, assuming headers are in the first row
     const startRow = 2;
+
+    // Map headers to keep track of duplicate columns in Excel as well
+    const headerOccurrences = {};
+    const headerMap = headers.map((header) => {
+        if (headerOccurrences[header] !== undefined) {
+            headerOccurrences[header]++;
+            return `${header} (${headerOccurrences[header]})`;
+        } else {
+            headerOccurrences[header] = 0;
+            return header;
+        }
+    });
 
     // Clear existing data rows while keeping formatting
     dataRows.forEach((rowData, rowIndex) => {
@@ -748,11 +760,14 @@ async function updateExcelSheetWithAllFormatting(workbook, sheetName, headers, d
 
         headers.forEach((header, colIndex) => {
             const cell = row.getCell(colIndex + 1);
-            const cellValue = rowData[header];
+            const headerWithOccurrence = headerMap[colIndex]; // Get header name with occurrence count if needed
+            const cellValue = rowData[headerWithOccurrence];
 
             // Preserve formatting and update value
             if (cellValue !== undefined) {
                 cell.value = cellValue; // Update only value
+                // Reapply the original cell style
+                cell.style = { ...cell.style }; // Clone original cell style to preserve colors, borders, alignment
             }
         });
     });
@@ -761,7 +776,7 @@ async function updateExcelSheetWithAllFormatting(workbook, sheetName, headers, d
 }
 
 
-// Function to map Monday data to an Excel-compatible format
+// Map Monday data to Excel headers with support for duplicate headers
 function mapMondayDataToExcel(headers, mondayItems) {
     const dataRows = [];
 
@@ -769,9 +784,22 @@ function mapMondayDataToExcel(headers, mondayItems) {
         const rowData = {};
         rowData['Year'] = item.name.trim(); // Assuming 'Year' is the item name
 
+        // Create a mapping to keep track of duplicate columns
+        const columnOccurrences = {};
+
         item.column_values.forEach((colVal) => {
-            const columnTitle = colVal.column ? colVal.column.title.trim() : '';
+            let columnTitle = colVal.column ? colVal.column.title.trim() : '';
             const mondayValue = colVal.text ? colVal.text.trim() : '';
+
+            // Handle duplicate column names by appending a count to the title
+            if (columnTitle) {
+                if (columnOccurrences[columnTitle] !== undefined) {
+                    columnOccurrences[columnTitle]++;
+                    columnTitle = `${columnTitle} (${columnOccurrences[columnTitle]})`;
+                } else {
+                    columnOccurrences[columnTitle] = 0; // Initialize first occurrence
+                }
+            }
 
             // Exclude "Comment" column
             if (columnTitle && columnTitle.toLowerCase() !== 'comment') {
