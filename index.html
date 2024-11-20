@@ -193,13 +193,14 @@
 
             try {
                 logElement.textContent = 'Fetching workspaces...';
-                const query = `
-                        {
-                            workspaces {
-                                id
-                                name
-                            }
-                        }`;
+                const workspaceQuery = `
+                {
+                    workspaces {
+                        id
+                        name
+                    }
+                }
+            `;
 
                 const response = await fetch('https://api.monday.com/v2', {
                     method: 'POST',
@@ -207,7 +208,7 @@
                         Authorization: apiKey,
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ query }),
+                    body: JSON.stringify({ query: workspaceQuery }),
                 });
 
                 if (!response.ok) {
@@ -219,6 +220,7 @@
                     throw new Error('GraphQL Errors: ' + JSON.stringify(data.errors));
                 }
 
+                // Populate workspace dropdown
                 workspaceDropdown.innerHTML = '<option value="">Select a workspace</option>';
                 data.data.workspaces.forEach(workspace => {
                     const option = document.createElement('option');
@@ -227,42 +229,61 @@
                     workspaceDropdown.appendChild(option);
                 });
 
-                workspaceDropdown.addEventListener('change', async () => {
-                    const selectedWorkspaceId = workspaceDropdown.value;
-                    if (!selectedWorkspaceId) return;
+                logElement.textContent = 'Workspaces loaded successfully.';
+            } catch (error) {
+                logElement.textContent = 'Error: ' + error.message;
+                console.error(error);
+            }
+        });
 
-                    const boardQuery = `
-                            {
-                                boards {
-                                    id
-                                    name
-                                }
-                            }`;
+        workspaceDropdown.addEventListener('change', async () => {
+            const selectedWorkspaceId = workspaceDropdown.value;
+            const apiKey = document.getElementById('api-key').value;
 
-                    const boardResponse = await fetch('https://api.monday.com/v2', {
-                        method: 'POST',
-                        headers: {
-                            Authorization: apiKey,
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({ query: boardQuery }),
-                    });
+            if (!selectedWorkspaceId) {
+                boardDropdown.innerHTML = '<option value="">Select a board</option>';
+                return;
+            }
 
-                    const boardData = await boardResponse.json();
-                    if (boardData.errors) {
-                        throw new Error('GraphQL Errors: ' + JSON.stringify(boardData.errors));
+            try {
+                logElement.textContent = 'Fetching boards...';
+                const boardQuery = `
+                {
+                    boards(workspace_ids: [${selectedWorkspaceId}]) {
+                        id
+                        name
                     }
+                }
+            `;
 
-                    boardDropdown.innerHTML = '<option value="">Select a board</option>';
-                    boardData.data.boards.forEach(board => {
-                        const option = document.createElement('option');
-                        option.value = board.id;
-                        option.textContent = board.name;
-                        boardDropdown.appendChild(option);
-                    });
+                const response = await fetch('https://api.monday.com/v2', {
+                    method: 'POST',
+                    headers: {
+                        Authorization: apiKey,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ query: boardQuery }),
                 });
 
-                logElement.textContent = 'Workspaces loaded successfully.';
+                if (!response.ok) {
+                    throw new Error('HTTP Error: ' + response.status);
+                }
+
+                const data = await response.json();
+                if (data.errors) {
+                    throw new Error('GraphQL Errors: ' + JSON.stringify(data.errors));
+                }
+
+                // Populate board dropdown
+                boardDropdown.innerHTML = '<option value="">Select a board</option>';
+                data.data.boards.forEach(board => {
+                    const option = document.createElement('option');
+                    option.value = board.id;
+                    option.textContent = board.name;
+                    boardDropdown.appendChild(option);
+                });
+
+                logElement.textContent = 'Boards loaded successfully.';
             } catch (error) {
                 logElement.textContent = 'Error: ' + error.message;
                 console.error(error);
@@ -299,7 +320,7 @@
                 logElement.textContent = result.message;
             } catch (error) {
                 console.error('', error);
-                logElement.textContent = '';
+                logElement.textContent = 'Error: ' + error.message;
             }
         });
 
