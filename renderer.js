@@ -1,81 +1,81 @@
-// renderer.js
+const { ipcRenderer } = require('electron');
 
-const boardIdInput = document.getElementById('boardId');
-const apiKeyInput = document.getElementById('apiKey');
-const filePathInput = document.getElementById('filePath');
-const selectFileButton = document.getElementById('selectFile');
-const startButton = document.getElementById('start');
-const logDiv = document.getElementById('log');
-const modeSwitch = document.getElementById('modeSwitch');
-const modeLabel = document.getElementById('modeLabel');
+// Elements
+const selectExcelButton = document.getElementById('select-excel');
+const excelFileInput = document.getElementById('excel-file');
+const syncExcelToMondayButton = document.getElementById('sync-excel-to-monday');
+const syncMondayToExcelButton = document.getElementById('sync-monday-to-excel');
+const boardIdInput = document.getElementById('board-id');
+const apiKeyInput = document.getElementById('api-key');
+const logOutput = document.getElementById('log-output');
 
-modeSwitch.addEventListener('change', () => {
-    if (modeSwitch.checked) {
-        // Switch is ON - Sync Monday to Excel
-        modeLabel.textContent = 'Sync Monday to Excel';
-        filePathInput.placeholder = 'Select existing Excel file to update';
-        selectFileButton.textContent = 'Select Excel File';
-    } else {
-        // Switch is OFF - Sync Excel to Monday
-        modeLabel.textContent = 'Sync Excel to Monday';
-        filePathInput.placeholder = 'Excel File Path';
-        selectFileButton.textContent = 'Select File';
-    }
-});
+// Helper function to log messages
+function logMessage(message) {
+    const logEntry = document.createElement('div');
+    logEntry.textContent = message;
+    logOutput.appendChild(logEntry);
+    logOutput.scrollTop = logOutput.scrollHeight;
+}
 
-selectFileButton.addEventListener('click', async () => {
-    const mode = 'open'; // Always open an existing file
-    const filePath = await window.electronAPI.selectFile(mode);
+// Select Excel file
+selectExcelButton.addEventListener('click', async () => {
+    const filePath = await ipcRenderer.invoke('select-file', 'open');
     if (filePath) {
-        filePathInput.value = filePath;
+        excelFileInput.value = filePath;
+        logMessage(`Selected Excel file: ${filePath}`);
+    } else {
+        logMessage('No file selected.');
     }
 });
 
-startButton.addEventListener('click', () => {
+// Sync Excel to Monday
+syncExcelToMondayButton.addEventListener('click', () => {
+    const filePath = excelFileInput.value.trim();
     const boardId = boardIdInput.value.trim();
     const apiKey = apiKeyInput.value.trim();
-    const filePath = filePathInput.value.trim();
 
-    if (!boardId || !apiKey) {
-        alert('Please fill in the Board ID and API Key.');
+    if (!filePath || !boardId || !apiKey) {
+        logMessage('Please provide all required inputs: Excel file, Board ID, and API Key.');
         return;
     }
 
-    if (!filePath) {
-        alert('Please select a file or save location.');
+    logMessage('Starting sync from Excel to Monday...');
+    ipcRenderer.send('start-processing', { filePath, boardId, apiKey });
+});
+
+// Sync Monday to Excel
+syncMondayToExcelButton.addEventListener('click', () => {
+    const filePath = excelFileInput.value.trim();
+    const boardId = boardIdInput.value.trim();
+    const apiKey = apiKeyInput.value.trim();
+
+    if (!filePath || !boardId || !apiKey) {
+        logMessage('Please provide all required inputs: Excel file, Board ID, and API Key.');
         return;
     }
 
-    logDiv.textContent = 'Processing...\n';
-
-    if (modeSwitch.checked) {
-        // Sync Monday to Excel
-        window.electronAPI.syncMondayToExcel({ boardId, apiKey, filePath });
-    } else {
-        // Sync Excel to Monday
-        window.electronAPI.startProcessing({ boardId, apiKey, filePath });
-    }
+    logMessage('Starting sync from Monday to Excel...');
+    ipcRenderer.send('sync-monday-to-excel', { filePath, boardId, apiKey });
 });
 
-window.electronAPI.onProcessingResult((event, result) => {
+// Listen for results
+ipcRenderer.on('processing-result', (event, result) => {
     if (result.success) {
-        logDiv.textContent += 'Processing completed successfully.\n';
+        logMessage('Sync from Excel to Monday completed successfully.');
     } else {
-        logDiv.textContent += `Error: ${result.message}\n`;
+        logMessage(`Error during sync from Excel to Monday: ${result.message}`);
     }
-    logDiv.scrollTop = logDiv.scrollHeight; // Auto-scroll to the bottom
 });
 
-window.electronAPI.onSyncResult((event, result) => {
+ipcRenderer.on('sync-result', (event, result) => {
     if (result.success) {
-        logDiv.textContent += 'Processing completed successfully.\n';
+        logMessage('Sync from Monday to Excel completed successfully.');
     } else {
-        logDiv.textContent += `Error: ${result.message}\n`;
+        logMessage(`Error during sync from Monday to Excel: ${result.message}`);
     }
-    logDiv.scrollTop = logDiv.scrollHeight; // Auto-scroll to the bottom
 });
 
-window.electronAPI.onLogMessage((event, message) => {
-    logDiv.textContent += message + '\n';
-    logDiv.scrollTop = logDiv.scrollHeight; // Auto-scroll to the bottom
+// Listen for log messages from the main process
+ipcRenderer.on('log-message', (event, message) => {
+    logMessage(message);
 });

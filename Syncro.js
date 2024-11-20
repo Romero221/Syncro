@@ -112,6 +112,166 @@ ipcMain.on('start-processing', async (event, args) => {
     }
 });
 
+// Fetch workspaces
+async function fetchWorkspaces(apiKey) {
+    const query = `
+    query {
+      workspaces {
+        id
+        name
+        boards {
+          id
+          name
+        }
+      }
+    }
+  `;
+
+    try {
+        const response = await axios.post(
+            'https://api.monday.com/v2',
+            { query },
+            {
+                headers: {
+                    Authorization: `Bearer ${apiKey}`,
+                },
+            }
+        );
+
+        if (response.data.errors) {
+            console.error('GraphQL errors:', JSON.stringify(response.data.errors, null, 2));
+            throw new Error('Failed to fetch workspaces from Monday.com.');
+        }
+
+        return response.data.data.workspaces;
+    } catch (error) {
+        console.error('Error fetching workspaces:', error.response?.data || error.message);
+        throw new Error('Could not fetch workspaces. Please check your API key and permissions.');
+    }
+}
+
+async function fetchBoardsByWorkspace(workspaceId, apiKey) {
+    const query = `
+    query ($workspaceId: ID!) {
+      boards (workspace_id: $workspaceId) {
+        id
+        name
+      }
+    }
+  `;
+
+    const variables = { workspaceId };
+
+    try {
+        const response = await axios.post(
+            'https://api.monday.com/v2',
+            { query, variables },
+            {
+                headers: { Authorization: `Bearer ${apiKey}` },
+            }
+        );
+
+        if (response.data.errors) {
+            console.error('GraphQL errors:', JSON.stringify(response.data.errors, null, 2));
+            return [];
+        }
+
+        return response.data.data.boards;
+    } catch (error) {
+        console.error('Error fetching boards by workspace:', error.message);
+        return [];
+    }
+}
+
+
+// Function to validate API key
+async function validateApiKey(apiKey) {
+    const query = `
+    query {
+      me {
+        id
+        name
+        email
+      }
+    }
+  `;
+
+    try {
+        const response = await axios.post(
+            'https://api.monday.com/v2',
+            { query },
+            {
+                headers: {
+                    Authorization: `Bearer ${apiKey}`,
+                },
+            }
+        );
+
+        if (response.data.errors) {
+            console.error('GraphQL errors:', JSON.stringify(response.data.errors, null, 2));
+            return false;
+        }
+
+        return true;
+    } catch (error) {
+        console.error('Error validating API key:', error.response?.data || error.message);
+        return false;
+    }
+}
+
+// IPC handlers for API key validation and workspace fetching
+ipcMain.handle('validate-api-key', async (event, apiKey) => {
+    const isValid = await validateApiKey(apiKey);
+    return isValid;
+});
+
+ipcMain.on('workspace-selected', async (event, workspaceId) => {
+    const apiKey = getApiKey(); // Retrieve API key securely
+    const boards = await fetchBoardsByWorkspace(workspaceId, apiKey);
+    event.reply('boards-updated', boards);
+});
+
+ipcMain.handle('fetch-workspaces', async (event, apiKey) => {
+    const workspaces = await fetchWorkspaces(apiKey);
+    return workspaces;
+});
+
+ipcMain.handle('fetch-boards-by-workspace', async (event, { apiKey, workspaceId }) => {
+    const query = `
+    query ($workspaceId: ID!) {
+      boards (workspace_id: $workspaceId) {
+        id
+        name
+      }
+    }
+  `;
+
+    const variables = {
+        workspaceId: workspaceId
+    };
+
+    try {
+        const response = await axios.post(
+            'https://api.monday.com/v2',
+            { query, variables },
+            {
+                headers: { Authorization: `Bearer ${apiKey}` },
+            }
+        );
+
+        if (response.data.errors) {
+            console.error('GraphQL errors:', JSON.stringify(response.data.errors, null, 2));
+            return [];
+        }
+
+        return response.data.data.boards;
+    } catch (error) {
+        console.error('Error fetching boards:', error);
+        return [];
+    }
+});
+
+
 // Function to extract the manufacturer (first word) from the file name
 function extractManufacturer(fileName) {
     const baseName = path.basename(fileName); // Get the base file name
@@ -583,6 +743,8 @@ async function fetchItemsByGroup(boardId, groupId, apiKey) {
         return null;
     }
 }
+
+
 
 // Reads Excel file with Specific Formatting
 function readExcelFileWithFormatting(filePath) {
