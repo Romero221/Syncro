@@ -162,6 +162,19 @@
             buttons.forEach(button => button.classList.toggle('dark-mode'));
         });
 
+        // Listen for log messages from the main process
+        window.electronAPI.onLogMessage((event, message) => {
+            const logElement = document.getElementById('log');
+            const formattedMessage = `[${new Date().toLocaleTimeString()}] ${message}\n`;
+
+            // Append the new log to the existing content
+            logElement.textContent += formattedMessage;
+
+            // Scroll to the bottom of the log
+            logElement.scrollTop = logElement.scrollHeight;
+        });
+
+
         const fetchWorkspacesButton = document.getElementById('fetch-workspaces');
         const workspaceDropdown = document.getElementById('workspace-dropdown');
         const boardDropdown = document.getElementById('board-dropdown');
@@ -285,8 +298,8 @@
 
                 logElement.textContent = result.message;
             } catch (error) {
-                console.error('Error:', error);
-                logElement.textContent = 'Error occurred.';
+                console.error('', error);
+                logElement.textContent = '';
             }
         });
 
