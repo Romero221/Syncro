@@ -112,6 +112,123 @@ ipcMain.on('start-processing', async (event, args) => {
     }
 });
 
+// Listen for sync start
+ipcMain.on('start-sync', async (event, args) => {
+    const { boardName, apiKey, selectedFilePath } = args;
+
+    try {
+        let resolvedBoardName = boardName;
+
+        if (!boardName) {
+            // Use the first word of the file name if the board name is blank
+            const fileName = path.basename(selectedFilePath);
+            resolvedBoardName = fileName.split(' ')[0];
+        }
+
+        console.log(`Resolved board name: ${resolvedBoardName}`);
+
+        const boardId = await ensureBoardExists(apiKey, resolvedBoardName);
+
+        if (!boardId) {
+            throw new Error('Failed to create or retrieve the board.');
+        }
+
+        console.log(`Using board ID: ${boardId}`);
+
+        // Call your sync logic here
+        await syncExcelToMonday(boardId, apiKey, selectedFilePath);
+
+        event.reply('sync-result', { success: true, message: 'Sync completed successfully!' });
+    } catch (error) {
+        console.error('An error occurred:', error);
+        event.reply('sync-result', { success: false, message: error.message });
+    }
+});
+
+// Function to create a board if it doesn't exist
+async function ensureBoardExists(apiKey, boardName) {
+    const query = `
+    query ($boardName: String!) {
+      boards (limit: 1, where: { name: $boardName }) {
+        id
+        name
+      }
+    }
+  `;
+
+    const variables = { boardName };
+
+    try {
+        const response = await axios.post(
+            'https://api.monday.com/v2',
+            { query, variables },
+            {
+                headers: { Authorization: `Bearer ${apiKey}` },
+            }
+        );
+
+        if (response.data.errors) {
+            console.error('GraphQL errors:', response.data.errors);
+            return null;
+        }
+
+        const boards = response.data.data.boards;
+        if (boards.length > 0) {
+            console.log(`Board "${boardName}" already exists.`);
+            return boards[0].id;
+        } else {
+            // Create the board if it doesn't exist
+            return await createBoard(apiKey, boardName);
+        }
+    } catch (error) {
+        console.error('Error checking board existence:', error);
+        return null;
+    }
+}
+
+// Function to create a new board
+async function createBoard(boardName, apiKey) {
+    const mutation = `
+    mutation($boardName: String!, $workspaceId: ID!) {
+        create_board(board_name: $boardName, board_kind: private, workspace_id: $workspaceId) {
+            id
+        }
+    }
+    `;
+
+    const variables = {
+        boardName,
+        workspaceId: selectedWorkspaceId, // Use the selected workspace ID
+    };
+
+    try {
+        const response = await axios.post(
+            "https://api.monday.com/v2",
+            { query: mutation, variables },
+            {
+                headers: {
+                    Authorization: apiKey,
+                },
+            }
+        );
+
+        if (response.data.errors) {
+            console.error("GraphQL errors:", response.data.errors);
+            return null;
+        }
+
+        console.log(`Created board with ID: ${response.data.data.create_board.id}`);
+        return response.data.data.create_board.id;
+    } catch (error) {
+        console.error("Error creating board:", error);
+        throw error;
+    }
+}
+
+
+
+
+
 // Fetch workspaces
 async function fetchWorkspaces(apiKey) {
     const query = `

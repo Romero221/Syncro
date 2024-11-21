@@ -194,13 +194,13 @@
             try {
                 logElement.textContent = 'Fetching workspaces...';
                 const workspaceQuery = `
-                {
-                    workspaces {
-                        id
-                        name
-                    }
+            {
+                workspaces {
+                    id
+                    name
                 }
-            `;
+            }
+        `;
 
                 const response = await fetch('https://api.monday.com/v2', {
                     method: 'POST',
@@ -296,23 +296,65 @@
         });
 
         startButton.addEventListener('click', async () => {
+            const selectedWorkspaceId = workspaceDropdown.value;
             const boardId = boardDropdown.value;
             const apiKey = document.getElementById('api-key').value;
             const filePath = filePathInput.value;
 
-            if (!boardId || !apiKey || !filePath) {
-                alert('Please fill in all fields.');
+            if (!apiKey || !filePath || !selectedWorkspaceId) {
+                alert('Please fill in all fields and select a workspace.');
                 return;
             }
 
             logElement.textContent = 'Processing...';
 
             try {
+                let finalBoardId = boardId;
                 const isSyncToMonday = !document.getElementById('modeSwitch').checked;
                 const method = isSyncToMonday ? 'startProcessing' : 'syncMondayToExcel';
 
+                if (!finalBoardId) {
+                    // Extract the first word of the Excel file name
+                    const fileName = filePath.split('\\').pop().split('/').pop();
+                    const newBoardName = fileName.split(' ')[0];
+
+                    logElement.textContent = `Creating a new board in the selected workspace: "${newBoardName}"...`;
+
+                    // Create a new board in the selected workspace using Monday.com API
+                    const createBoardMutation = `
+                mutation {
+                    create_board(board_name: "${newBoardName}", board_kind: public, workspace_id: "${selectedWorkspaceId}") {
+                        id
+                        name
+                    }
+                }
+            `;
+
+                    const response = await fetch('https://api.monday.com/v2', {
+                        method: 'POST',
+                        headers: {
+                            Authorization: apiKey,
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ query: createBoardMutation }),
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('HTTP Error: ' + response.status);
+                    }
+
+                    const data = await response.json();
+                    if (data.errors) {
+                        throw new Error('GraphQL Errors: ' + JSON.stringify(data.errors));
+                    }
+
+                    finalBoardId = data.data.create_board.id;
+                    logElement.textContent = `New board "${newBoardName}" created successfully in the selected workspace.`;
+                }
+
+                // Proceed with processing
                 const result = await window.electronAPI[method]({
-                    boardId,
+                    boardId: finalBoardId,
                     apiKey,
                     filePath,
                 });
@@ -323,6 +365,7 @@
                 logElement.textContent = 'Error: ' + error.message;
             }
         });
+
 
         // Adjusting Mode Label
         const modeSwitch = document.getElementById('modeSwitch');

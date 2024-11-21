@@ -79,3 +79,4 @@ ipcRenderer.on('sync-result', (event, result) => {
 ipcRenderer.on('log-message', (event, message) => {
     logMessage(message);
 });
+
