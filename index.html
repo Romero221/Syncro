@@ -117,7 +117,7 @@
             </label>
             <label id="modeLabel">Sync Excel to Monday</label>
         </div>
-        <button id="themeToggle">Toggle Theme</button>
+        <button id="themeToggle">Light Theme</button>
     </div>
     <br><br>
     <div style="display: flex; align-items: center; margin-bottom: 10px;">
@@ -186,18 +186,36 @@
         const themeToggleButton = document.getElementById('themeToggle');
         const body = document.body;
 
+        // Function to update the button text
+        function updateThemeButtonText() {
+            const isDarkMode = body.classList.contains('dark-mode');
+            themeToggleButton.textContent = isDarkMode ? 'Dark Theme' : 'Light Theme';
+        }
+
+        // Add event listener to the theme toggle button
         themeToggleButton.addEventListener('click', () => {
+            // Toggle dark mode on the body
             body.classList.toggle('dark-mode');
 
+            // Update the theme of other elements
             const inputs = document.querySelectorAll('input[type="text"], select');
             inputs.forEach(input => input.classList.toggle('dark-mode'));
 
             const log = document.getElementById('log');
-            log.classList.toggle('dark-mode');
+            if (log) {
+                log.classList.toggle('dark-mode');
+            }
 
             const buttons = document.querySelectorAll('button');
             buttons.forEach(button => button.classList.toggle('dark-mode'));
+
+            // Update the button text
+            updateThemeButtonText();
         });
+
+        // Initialize the button text based on the current mode
+        updateThemeButtonText();
+
 
         // Listen for log messages from the main process
         window.electronAPI.onLogMessage((event, message) => {
