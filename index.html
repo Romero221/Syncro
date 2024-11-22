@@ -120,11 +120,48 @@
         <button id="themeToggle">Toggle Theme</button>
     </div>
     <br><br>
-    <div>
-        <label for="api-key">API Key:</label>
-        <input id="api-key" type="text" placeholder="Enter your Monday API key" />
+    <div style="display: flex; align-items: center; margin-bottom: 10px;">
+        <label for="api-key" style="margin-right: 5px;">API Key:</label>
+        <div style="position: relative; margin-right: 10px;">
+            <div style="
+                width: 20px;
+                height: 20px;
+                border-radius: 50%;
+                background-color: #007BFF;
+                color: white;
+                font-size: 14px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                cursor: pointer;
+            "
+                 title="Hover for info"
+                 id="api-key-help">
+                ?
+            </div>
+            <div id="tooltip"
+                 style="
+                display: none;
+                position: absolute;
+                top: 30px;
+                left: 0;
+                background-color: #f9f9f9;
+                color: #000;
+                padding: 10px;
+                border: 1px solid #ccc;
+                border-radius: 5px;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+                z-index: 1000;
+                width: 300px;
+                font-size: 14px;
+            ">
+                To obtain your Monday.com API key, log in to your Monday.com account, click on your profile picture in the top-right corner, go to 'Developer', select the 'API' section, and copy your personal API key. For more details, visit Monday.com Help Center.
+            </div>
+        </div>
+        <input id="api-key" type="text" placeholder="Enter your Monday API key" style="flex-grow: 1; margin-right: 10px;" />
         <button id="fetch-workspaces">Fetch Workspaces</button>
     </div>
+
     <div>
         <label for="workspace-dropdown">Workspace:</label>
         <select id="workspace-dropdown">
@@ -134,7 +171,7 @@
     <div>
         <label for="board-dropdown">Board:</label>
         <select id="board-dropdown">
-            <option value="">Select a board or create new</option>
+            <option value="">Select a Board</option>
         </select>
     </div>
     <br />
@@ -182,6 +219,16 @@
         const selectFileButton = document.getElementById('selectFile');
         const startButton = document.getElementById('start');
         const logElement = document.getElementById('log');
+        const apiKeyHelp = document.getElementById('api-key-help');
+        const tooltip = document.getElementById('tooltip');
+
+        apiKeyHelp.addEventListener('mouseover', () => {
+            tooltip.style.display = 'block';
+        });
+
+        apiKeyHelp.addEventListener('mouseout', () => {
+            tooltip.style.display = 'none';
+        });
 
         fetchWorkspacesButton.addEventListener('click', async () => {
             const apiKey = document.getElementById('api-key').value;
@@ -194,13 +241,13 @@
             try {
                 logElement.textContent = 'Fetching workspaces...';
                 const workspaceQuery = `
-            {
-                workspaces {
-                    id
-                    name
+                {
+                    workspaces {
+                        id
+                        name
+                    }
                 }
-            }
-        `;
+            `;
 
                 const response = await fetch('https://api.monday.com/v2', {
                     method: 'POST',
@@ -248,13 +295,13 @@
             try {
                 logElement.textContent = 'Fetching boards...';
                 const boardQuery = `
-                {
-                    boards(workspace_ids: [${selectedWorkspaceId}]) {
-                        id
-                        name
+                    {
+                        boards(workspace_ids: [${selectedWorkspaceId}]) {
+                            id
+                            name
+                        }
                     }
-                }
-            `;
+                `;
 
                 const response = await fetch('https://api.monday.com/v2', {
                     method: 'POST',
@@ -275,7 +322,7 @@
                 }
 
                 // Populate board dropdown
-                boardDropdown.innerHTML = '<option value="">Select a board</option>';
+                boardDropdown.innerHTML = '<option value="">Select a board / Create a New Board</option>';
                 data.data.boards.forEach(board => {
                     const option = document.createElement('option');
                     option.value = board.id;
@@ -322,13 +369,13 @@
 
                     // Create a new board in the selected workspace using Monday.com API
                     const createBoardMutation = `
-                mutation {
-                    create_board(board_name: "${newBoardName}", board_kind: public, workspace_id: "${selectedWorkspaceId}") {
-                        id
-                        name
+                    mutation {
+                        create_board(board_name: "${newBoardName}", board_kind: public, workspace_id: "${selectedWorkspaceId}") {
+                            id
+                            name
+                        }
                     }
-                }
-            `;
+                `;
 
                     const response = await fetch('https://api.monday.com/v2', {
                         method: 'POST',
