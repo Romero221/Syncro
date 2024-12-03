@@ -225,10 +225,6 @@ async function createBoard(boardName, apiKey) {
     }
 }
 
-
-
-
-
 // Fetch workspaces
 async function fetchWorkspaces(apiKey) {
     const query = `
@@ -299,7 +295,6 @@ async function fetchBoardsByWorkspace(workspaceId, apiKey) {
         return [];
     }
 }
-
 
 // Function to validate API key
 async function validateApiKey(apiKey) {
@@ -860,8 +855,6 @@ async function fetchItemsByGroup(boardId, groupId, apiKey) {
         return null;
     }
 }
-
-
 
 // Reads Excel file with Specific Formatting
 function readExcelFileWithFormatting(filePath) {
