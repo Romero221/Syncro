@@ -175,16 +175,19 @@
         </select>
     </div>
     <br />
-    <label for="filePath">Excel File:</label>
+    <label for="filePath">File:</label>
     <input type="text" id="filePath" readonly />
     <button id="selectFile">Select File</button>
     <br /><br />
     <button id="start">Start Processing</button>
     <div id="log"></div>
-
+    <script src="Syncro.js"></script>
+    <script src="renderer.js"></script>
+    <script src="preload.js"></script>
     <script>
         const themeToggleButton = document.getElementById('themeToggle');
         const body = document.body;
+        const pdfFilesInput = document.getElementById('pdf-files');
 
         // Function to update the button text
         function updateThemeButtonText() {
@@ -259,13 +262,13 @@
             try {
                 logElement.textContent = 'Fetching workspaces...';
                 const workspaceQuery = `
-                {
-                    workspaces {
-                        id
-                        name
-                    }
-                }
-            `;
+                                    {
+                                        workspaces {
+                                            id
+                                            name
+                                        }
+                                    }
+                                `;
 
                 const response = await fetch('https://api.monday.com/v2', {
                     method: 'POST',
@@ -313,13 +316,13 @@
             try {
                 logElement.textContent = 'Fetching boards...';
                 const boardQuery = `
-                    {
-                        boards(workspace_ids: [${selectedWorkspaceId}]) {
-                            id
-                            name
-                        }
-                    }
-                `;
+                                        {
+                                            boards(workspace_ids: [${selectedWorkspaceId}]) {
+                                                id
+                                                name
+                                            }
+                                        }
+                                    `;
 
                 const response = await fetch('https://api.monday.com/v2', {
                     method: 'POST',
@@ -355,9 +358,35 @@
             }
         });
 
+        // Function to handle file selection
         selectFileButton.addEventListener('click', async () => {
-            const filePath = await window.electronAPI.selectFile();
-            filePathInput.value = filePath || '';
+            const filePaths = await window.electronAPI.selectFile('multiple'); // Allow multiple file selection
+
+            if (filePaths && filePaths.length > 0) {
+                // Display selected file paths in the input field
+                filePathInput.value = filePaths.join(', ');
+
+                // Check file types
+                const areAllExcels = filePaths.every(filePath =>
+                    filePath.toLowerCase().endsWith('.xlsx') || filePath.toLowerCase().endsWith('.xls')
+                );
+                const areAllPdfs = filePaths.every(filePath => filePath.toLowerCase().endsWith('.pdf'));
+
+                if (areAllExcels) {
+                    console.log('Excel files detected. Proceeding with Excel processing...');
+                    // Run the existing Excel processing logic
+                    window.electronAPI.startProcessing(filePaths);
+                } else if (areAllPdfs) {
+                    console.log('PDF files detected. Running Docuparse.js...');
+                    // Run Docuparse.js for PDF files
+                    window.electronAPI.runDocuparse(filePaths);
+                } else {
+                    alert('Please select only Excel or only PDF files.');
+                    filePathInput.value = ''; // Clear the input if invalid files are selected
+                }
+            } else {
+                console.log('No files selected.');
+            }
         });
 
         startButton.addEventListener('click', async () => {
@@ -387,13 +416,13 @@
 
                     // Create a new board in the selected workspace using Monday.com API
                     const createBoardMutation = `
-                    mutation {
-                        create_board(board_name: "${newBoardName}", board_kind: public, workspace_id: "${selectedWorkspaceId}") {
-                            id
-                            name
-                        }
-                    }
-                `;
+                                        mutation {
+                                            create_board(board_name: "${newBoardName}", board_kind: public, workspace_id: "${selectedWorkspaceId}") {
+                                                id
+                                                name
+                                            }
+                                        }
+                                    `;
 
                     const response = await fetch('https://api.monday.com/v2', {
                         method: 'POST',

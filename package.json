@@ -1,5 +1,5 @@
 {
-  "name": "Syncro App",
+  "name": "Syncro",
   "version": "1.0.0",
   "description": "Sync Excel data to Monday.com with a GUI",
   "main": "Syncro.js",
@@ -10,9 +10,22 @@
     "axios": "^1.4.0",
     "electron": "^25.2.0",
     "exceljs": "^4.4.0",
+    "lsof": "^0.0.4",
+    "monday-sdk-js": "^0.5.6",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "eslint": "^9.14.0"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Romero221/Syncro.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Romero221/Syncro/issues"
+  },
+  "homepage": "https://github.com/Romero221/Syncro#readme"
 }

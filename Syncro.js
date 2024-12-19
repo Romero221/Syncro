@@ -7,6 +7,7 @@ const ExcelJS = require('exceljs');
 const axios = require('axios');
 const fs = require('fs');
 
+
 let mainWindow;
 
 // Custom logging function
@@ -61,30 +62,24 @@ app.on('window-all-closed', function () {
 
 // Modify select-file handler
 ipcMain.handle('select-file', async (event, mode) => {
-    if (mode === 'open') {
-        const result = await dialog.showOpenDialog({
-            properties: ['openFile'],
-            filters: [{ name: 'Excel Files', extensions: ['xlsx', 'xls'] }],
-        });
-        if (result.canceled) {
-            return null;
-        } else {
-            return result.filePaths[0];
-        }
+    const dialogOptions = {
+        properties: mode === 'multiple' ? ['openFile', 'multiSelections'] : ['openFile'],
+        filters: [
+            { name: 'Excel Files', extensions: ['xlsx', 'xls'] },
+            { name: 'PDF Files', extensions: ['pdf'] },
+            { name: 'All Files', extensions: ['*'] },
+        ],
+    };
+
+    const result = await dialog.showOpenDialog(dialogOptions);
+
+    if (result.canceled) {
+        return null;
     } else {
-        // For 'save' mode (if needed)
-        const result = await dialog.showSaveDialog({
-            title: 'Save Excel File',
-            defaultPath: 'board_data.xlsx',
-            filters: [{ name: 'Excel Files', extensions: ['xlsx', 'xls'] }],
-        });
-        if (result.canceled) {
-            return null;
-        } else {
-            return result.filePath;
-        }
+        return result.filePaths;
     }
 });
+
 
 // Add a listener for syncing Monday to Excel
 ipcMain.on('sync-monday-to-excel', async (event, args) => {
@@ -381,6 +376,29 @@ ipcMain.handle('fetch-boards-by-workspace', async (event, { apiKey, workspaceId 
         console.error('Error fetching boards:', error);
         return [];
     }
+});
+
+// Handle the "run-docuparse" event
+ipcMain.on('run-docuparse', (event, pdfPaths) => {
+    console.log('Running Docuparse.js with the following PDFs:', pdfPaths);
+
+    // Run Docuparse.js as a separate process
+    execFile('node', ['Docuparse.js', ...pdfPaths], (error, stdout, stderr) => {
+        if (error) {
+            console.error('Error running Docuparse.js:', error);
+            event.reply('log-message', `Error: ${error.message}`);
+            return;
+        }
+
+        if (stderr) {
+            console.error('Error output from Docuparse.js:', stderr);
+            event.reply('log-message', `Error: ${stderr}`);
+            return;
+        }
+
+        console.log('Output from Docuparse.js:', stdout);
+        event.reply('log-message', `Docuparse.js output: ${stdout}`);
+    });
 });
 
 
